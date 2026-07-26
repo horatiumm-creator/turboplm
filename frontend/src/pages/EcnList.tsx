@@ -17,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import * as api from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import type { EcnPriority, EcnStatus, EcnSummary } from '../api/types';
 import {
@@ -37,6 +38,8 @@ interface NewEcnValues {
 
 export default function EcnList() {
   const { message } = AntdApp.useApp();
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'VIEWER';
   const navigate = useNavigate();
 
   const [items, setItems] = useState<EcnSummary[]>([]);
@@ -174,9 +177,11 @@ export default function EcnList() {
         <Typography.Title level={3} style={{ margin: 0 }}>
           Engineering Changes
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          New ECN
-        </Button>
+        {canEdit && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            New ECN
+          </Button>
+        )}
       </div>
 
       <Space style={{ marginBottom: 16 }} wrap>

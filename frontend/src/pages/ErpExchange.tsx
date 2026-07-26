@@ -25,6 +25,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import * as api from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import type { ImportIssue, ImportResult, PartRef, RevisionSummary } from '../api/types';
 import { LIFECYCLE_META } from '../components/meta';
@@ -52,6 +53,8 @@ export default function ErpExchange() {
   const { message } = AntdApp.useApp();
 
   const [exportPicker, setExportPicker] = useState<PickerState>(EMPTY_PICKER);
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'VIEWER';
   const [importPicker, setImportPicker] = useState<PickerState>(EMPTY_PICKER);
 
   const [target, setTarget] = useState<ImportTarget>('parts');
@@ -258,7 +261,7 @@ export default function ErpExchange() {
         </Row>
       </Card>
 
-      <Card title="Import">
+      {canEdit && <Card title="Import">
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Radio.Group
             value={target}
@@ -353,7 +356,7 @@ export default function ErpExchange() {
             )}
           </Space>
         </Space>
-      </Card>
+      </Card>}
 
       {result && (
         <Card

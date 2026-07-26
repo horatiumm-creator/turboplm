@@ -20,6 +20,12 @@ export function requireWriteRole(req: Request, _res: Response, next: NextFunctio
     next();
     return;
   }
+  // Resolving a variant configuration writes nothing — it only uses POST because
+  // the option selection is a structured body — so read-only callers may use it.
+  if (/^\/revisions\/\d+\/resolve-variant$/.test(req.path)) {
+    next();
+    return;
+  }
   const role = req.user?.role;
   if (role === 'ENGINEER' || role === 'ADMIN') {
     next();

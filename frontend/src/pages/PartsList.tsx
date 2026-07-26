@@ -17,6 +17,7 @@ import type { TablePaginationConfig } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../api/client';
 import type { Lifecycle, Paged, PartCategory, PartSummary } from '../api/types';
 import { CATEGORY_OPTIONS, CategoryTag, formatDate, LIFECYCLE_OPTIONS, LifecycleTag } from '../components/meta';
@@ -32,6 +33,8 @@ interface NewPartValues {
 export default function PartsList() {
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
+  const { user } = useAuth();
+  const canEdit = user?.role !== 'VIEWER';
   const [form] = Form.useForm<NewPartValues>();
 
   const [data, setData] = useState<Paged<PartSummary> | null>(null);
@@ -163,9 +166,11 @@ export default function PartsList() {
         <Typography.Title level={3} style={{ margin: 0 }}>
           Parts
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openModal}>
-          New part
-        </Button>
+        {canEdit && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openModal}>
+            New part
+          </Button>
+        )}
       </Space>
 
       <Card>

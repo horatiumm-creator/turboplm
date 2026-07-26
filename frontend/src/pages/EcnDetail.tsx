@@ -203,8 +203,11 @@ export default function EcnDetail() {
     );
   }
 
-  const isDraft = ecn.status === 'DRAFT';
-  const itemsEditable = ecn.status === 'DRAFT' || ecn.status === 'IN_REVIEW';
+  // Viewers get a read-only page: the server rejects their writes anyway, so the
+  // controls should not be offered in the first place.
+  const canEdit = user?.role !== 'VIEWER';
+  const isDraft = canEdit && ecn.status === 'DRAFT';
+  const itemsEditable = canEdit && (ecn.status === 'DRAFT' || ecn.status === 'IN_REVIEW');
   const deletable = isDraft && ecn.items.every((item) => item.toRevision === null);
 
   const transition = (action: EcnTransitionAction, title: string, content: React.ReactNode) => {
@@ -742,7 +745,7 @@ export default function EcnDetail() {
         style={{ marginBottom: 16 }}
         styles={{ body: { display: 'flex', gap: 8, flexWrap: 'wrap' } }}
       >
-        {ecn.status === 'DRAFT' && (
+        {canEdit && ecn.status === 'DRAFT' && (
           <>
             <Button type="primary" icon={<SendOutlined />} onClick={openSubmit}>
               Submit for review
@@ -758,7 +761,7 @@ export default function EcnDetail() {
             </Button>
           </>
         )}
-        {ecn.status === 'IN_REVIEW' && (
+        {canEdit && ecn.status === 'IN_REVIEW' && (
           <>
             <Button
               type="primary"
@@ -791,7 +794,7 @@ export default function EcnDetail() {
             </Button>
           </>
         )}
-        {ecn.status === 'APPROVED' && (
+        {canEdit && ecn.status === 'APPROVED' && (
           <>
             <Button
               type="primary"
@@ -812,7 +815,12 @@ export default function EcnDetail() {
             </Button>
           </>
         )}
-        {(ecn.status === 'RELEASED' || ecn.status === 'CANCELLED') && (
+        {!canEdit && (
+          <Typography.Text type="secondary">
+            Read-only access — an engineer account is needed to act on this change.
+          </Typography.Text>
+        )}
+        {canEdit && (ecn.status === 'RELEASED' || ecn.status === 'CANCELLED') && (
           <Typography.Text type="secondary">
             This change is {ecn.status === 'RELEASED' ? 'released' : 'cancelled'} — no further
             actions.
