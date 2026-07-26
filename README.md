@@ -23,7 +23,7 @@ You need **Docker Desktop** (or Docker Engine + Compose v2). Nothing else — No
 Postgres and the CAD toolchain all live in containers.
 
 ```bash
-git clone https://github.com/vincentmakes/turboplm.git
+git clone https://github.com/horatiumm-creator/turboplm.git
 cd turboplm
 cp .env.example .env          # sensible local defaults; edit only if you want email/OAuth
 docker compose up -d --build
