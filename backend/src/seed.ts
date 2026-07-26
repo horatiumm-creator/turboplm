@@ -673,8 +673,19 @@ async function seedX1Pro(): Promise<void> {
   console.log(`Seed: created TurboDrone X1 Pro (${PRO_PARTS.length} parts, 4-level eBOM)`);
 }
 
+/**
+ * Demo data (including well-known demo logins whose passwords are published in the
+ * README) must never be created on an internet-facing instance. Set
+ * SEED_DEMO_DATA=false there and create the first admin with `npm run create-admin`.
+ */
+const SEED_DEMO_DATA = process.env.SEED_DEMO_DATA !== 'false';
+
 async function main(): Promise<void> {
   try {
+    if (!SEED_DEMO_DATA) {
+      console.log('Seed: SEED_DEMO_DATA=false — skipping all demo data and demo logins');
+      return;
+    }
     await seed();
     await seedEcn();
     await seedX1Pro();

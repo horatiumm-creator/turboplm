@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "create-admin": "node dist/create-admin.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

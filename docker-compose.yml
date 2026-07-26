@@ -36,6 +36,9 @@ services:
       JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-25mb}
       WEBHOOK_BLOCK_PRIVATE_HOSTS: ${WEBHOOK_BLOCK_PRIVATE_HOSTS:-false}
       CAD_SERVICE_URL: ${CAD_SERVICE_URL:-http://cad:4100}
+      # Public deployments: no self-registration, no demo data/logins.
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     ports:
       - "8010:4000"
     volumes:
@@ -54,10 +57,20 @@ services:
 
   web:
     build: ./frontend
+    container_name: turboplm-web
     ports:
-      - "3010:80"
+      - "127.0.0.1:3010:80"   # local access only; the internet arrives via the edge proxy
     depends_on:
       - api
+    networks:
+      - default
+      - edge
+
+networks:
+  # Shared with the Caddy reverse proxy that terminates TLS for every site on
+  # this host. Created once with: docker network create edge
+  edge:
+    external: true
 
 volumes:
   turboplm-pgdata:

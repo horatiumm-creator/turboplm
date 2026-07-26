@@ -29,7 +29,7 @@ cp .env.example .env          # sensible local defaults; edit only if you want e
 docker compose up -d --build
 ```
 
-Open **http://localhost:3010** and sign in with one of the seeded accounts:
+Open **http://localhost:3010** and sign in with one of the seeded development accounts:
 
 | Email | Password | Role |
 |---|---|---|
@@ -37,13 +37,23 @@ Open **http://localhost:3010** and sign in with one of the seeded accounts:
 | `admin@turboplm.local` | `admin1234` | Admin — plus users, attributes, workflows, integrations |
 | `viewer@turboplm.local` | `viewer1234` | Viewer — read-only (all edit controls hidden) |
 
+> **Important:** those are **local development credentials only**, published here on
+> purpose. Never expose an instance that has them. For anything reachable from the
+> internet, start it with `SEED_DEMO_DATA=false` and `ALLOW_REGISTRATION=false`, then
+> create your first administrator explicitly:
+>
+> ```bash
+> docker compose exec api npm run create-admin -- you@example.com 'a-long-strong-password' 'Your Name'
+> ```
+
 The database seeds itself on first start with a demo product: a **TurboDrone X1**
 quadcopter (27 parts, four BOM levels, released and in-work revisions, two process
 plans) plus a **TurboDrone X1 Pro** variant that shares subassemblies — so BOM compare,
 where-used and change management have real data to work on immediately.
 
 > **Tip:** Register your own account from the login page if you'd rather start clean;
-> new self-registered users get the Engineer role.
+> new self-registered users get the Engineer role. Set `ALLOW_REGISTRATION=false` to
+> turn that off.
 
 To stop, and to wipe everything including the database and uploaded files:
 
@@ -278,15 +288,25 @@ database in `turboplm-pgdata`.
 
 ## Deployment Notes
 
-- **Change `JWT_SECRET`.** The default is a well-known placeholder.
-- **Put TLS in front.** Session cookies are `httpOnly` + `sameSite=lax` but are not
-  `secure`; terminate HTTPS at a reverse proxy and set `PUBLIC_URL` accordingly.
+- **Change `JWT_SECRET`.** The default is a well-known placeholder published in this
+  repository — leaving it lets anyone forge a session cookie for any user, including an
+  administrator. The API logs a warning at startup if it is still the default while
+  serving over HTTPS.
+- **Set `SEED_DEMO_DATA=false`** so the demo product and the demo logins above are never
+  created, and bootstrap your admin with `npm run create-admin`.
+- **Set `ALLOW_REGISTRATION=false`** unless you intend a public sandbox; open
+  registration grants Engineer-level write access to anyone.
+- **Serve over HTTPS.** Session cookies are automatically marked `secure` when
+  `PUBLIC_URL` is an `https://` URL.
+- **Access control is role-based, not per-object.** Any signed-in user can read every
+  part, BOM and change in the instance; roles only gate writes. Do not give a read-only
+  account to someone who should not see all of the data.
 - **Set `WEBHOOK_BLOCK_PRIVATE_HOSTS=true`** if the instance is reachable from the
   internet, so webhook targets can't be used to probe your internal network.
 - **Back up both volumes** — the Postgres data and the uploads (documents and CAD files
   are on disk, not in the database).
-- **Self-registration is open** and grants the Engineer role. Restrict it, or promote a
-  single admin and demote the rest from Admin → Users, before exposing the instance.
+- **Back up before upgrading.** `prisma db push` is used for schema changes, which can be
+  destructive on column removals.
 
 ---
 

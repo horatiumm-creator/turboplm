@@ -19,9 +19,19 @@ function toUserInfo(u: User) {
   };
 }
 
+/**
+ * Open self-registration is convenient locally but wrong for an internet-facing
+ * instance, where it would hand write access to anyone. Set
+ * ALLOW_REGISTRATION=false and have an admin create accounts instead.
+ */
+const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION !== 'false';
+
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
+    if (!ALLOW_REGISTRATION) {
+      throw new HttpError(403, 'Self-registration is disabled — ask an administrator for an account');
+    }
     const { name, email, password } = (req.body ?? {}) as Record<string, unknown>;
     if (typeof name !== 'string' || name.trim().length < 2)
       throw new HttpError(400, 'Name must be at least 2 characters');
@@ -69,7 +79,10 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 router.get('/providers', (_req, res) => {
-  res.json({ google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) });
+  res.json({
+    google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    registration: ALLOW_REGISTRATION,
+  });
 });
 
 router.get('/google', (_req, res) => {

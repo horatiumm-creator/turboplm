@@ -4,6 +4,20 @@ import { prisma } from '../lib/prisma';
 import { HttpError } from '../lib/errors';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+
+/**
+ * Serve cookies as `secure` whenever the public URL is HTTPS, so a session
+ * cookie can never travel over plaintext on a real deployment. Local HTTP
+ * development is unaffected.
+ */
+const SECURE_COOKIES = (process.env.PUBLIC_URL || '').startsWith('https://');
+
+if (JWT_SECRET === 'dev-secret-change-me' && SECURE_COOKIES) {
+  console.warn(
+    'SECURITY: JWT_SECRET is still the default placeholder while serving over HTTPS — ' +
+      'set a strong JWT_SECRET or any user session can be forged.'
+  );
+}
 export const COOKIE_NAME = 'turboplm_token';
 
 export interface AuthUser {
@@ -31,6 +45,7 @@ export function setAuthCookie(res: Response, userId: number): void {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'lax',
+    secure: SECURE_COOKIES,
     maxAge: 7 * 24 * 3600 * 1000,
   });
 }
