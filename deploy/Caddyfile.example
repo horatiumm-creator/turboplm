@@ -1,0 +1,38 @@
+# Example: fronting several dockerized sites from one host with Caddy.
+#
+# Caddy owns :80/:443, terminates TLS with automatic Let's Encrypt certificates,
+# and routes by hostname. Each site's public container joins a shared external
+# Docker network so Caddy can reach it by container name:
+#
+#   docker network create edge
+#
+# and in each site's compose file:
+#
+#   services:
+#     web:
+#       networks: [default, edge]
+#   networks:
+#     edge:
+#       external: true
+
+{
+	email you@example.com
+}
+
+# turboplm.com serves the marketing site; the application itself is on the
+# demo subdomain so the two never fight over routes like / or /login.
+turboplm.com, www.turboplm.com {
+	encode zstd gzip
+	reverse_proxy turboplm-landing:80
+}
+
+demo.turboplm.com {
+	encode zstd gzip
+
+	# Uploaded CAD/document files can be large; allow room for them.
+	request_body {
+		max_size 60MB
+	}
+
+	reverse_proxy turboplm-web:80
+}

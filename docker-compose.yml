@@ -55,6 +55,15 @@ services:
     volumes:
       - turboplm-uploads:/app/uploads
 
+  # Public marketing site for turboplm.com (the app itself lives on demo.turboplm.com).
+  landing:
+    build: ./landing
+    container_name: turboplm-landing
+    restart: unless-stopped
+    networks:
+      - default
+      - edge
+
   web:
     build: ./frontend
     container_name: turboplm-web

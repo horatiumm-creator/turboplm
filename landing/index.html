@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TurboPLM — Self-hosted Product Lifecycle Management</title>
+<meta name="description" content="Open, self-hosted PLM: product structure, multi-level BOM, part revisioning, manufacturing processes and full engineering change control. Runs on your own hardware in Docker." />
+<meta property="og:title" content="TurboPLM — Self-hosted Product Lifecycle Management" />
+<meta property="og:description" content="Product structure, BOM, revisioning and engineering change control — on your own hardware." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://turboplm.com" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#ffffff; --bg-alt:#f6f8fb; --bg-deep:#0b1524;
+    --text:#111a28; --muted:#5b6a80; --line:#e3e8ef;
+    --accent:#1e6fd9; --accent-soft:#e8f1fd; --accent-deep:#1656ab;
+    --ok:#1f9d55; --warn:#c47f0a;
+    --radius:12px; --max:1120px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b1220; --bg-alt:#111a2b; --bg-deep:#070d18;
+      --text:#e8edf5; --muted:#93a2b8; --line:#1e2a3d;
+      --accent:#4d94f0; --accent-soft:#12233c; --accent-deep:#75aef5;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  h1,h2,h3{line-height:1.2;margin:0 0 .5em;letter-spacing:-0.02em}
+  h2{font-size:clamp(1.6rem,3.4vw,2.3rem);margin-top:0}
+  h3{font-size:1.06rem;margin-bottom:.35em}
+  p{margin:0 0 1em}
+  .lede{color:var(--muted);font-size:1.06rem;max-width:62ch}
+
+  /* header */
+  header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px;gap:24px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.12rem;color:var(--text)}
+  .brand:hover{text-decoration:none}
+  .mark{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
+  .nav-links{display:flex;gap:22px;align-items:center;font-size:.94rem}
+  .nav-links a{color:var(--muted)}
+  .nav-links a:hover{color:var(--text);text-decoration:none}
+  @media(max-width:760px){.nav-links{display:none}}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent;cursor:pointer;transition:.15s}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-deep);color:#fff}
+  .btn-ghost{border-color:var(--line);color:var(--text);background:var(--bg)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-sm{padding:8px 14px;font-size:.88rem}
+
+  /* sections */
+  section{padding:76px 0;border-top:1px solid var(--line)}
+  section.alt{background:var(--bg-alt)}
+  .eyebrow{text-transform:uppercase;letter-spacing:.09em;font-size:.76rem;font-weight:700;color:var(--accent);margin-bottom:10px}
+
+  /* hero */
+  .hero{padding:84px 0 72px;border-top:none}
+  .hero h1{font-size:clamp(2.1rem,5.2vw,3.4rem)}
+  .hero .lede{font-size:1.18rem;max-width:66ch}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+  .hero-note{margin-top:18px;font-size:.9rem;color:var(--muted)}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}
+  .badge{font-size:.78rem;padding:4px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+
+  /* product mock */
+  .mock{margin-top:52px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--bg);box-shadow:0 18px 44px rgba(9,20,38,.10)}
+  .mock-bar{display:flex;align-items:center;gap:7px;padding:10px 14px;background:var(--bg-alt);border-bottom:1px solid var(--line)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--line)}
+  .mock-url{margin-left:10px;font-size:.78rem;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .mock-body{display:grid;grid-template-columns:186px 1fr;min-height:330px}
+  .mock-side{background:var(--bg-deep);padding:16px 12px;display:flex;flex-direction:column;gap:3px}
+  .mock-side b{color:#fff;font-size:.9rem;padding:6px 10px 12px;display:flex;align-items:center;gap:8px}
+  .mock-side span{color:#9fb3cd;font-size:.82rem;padding:7px 10px;border-radius:7px}
+  .mock-side span.on{background:var(--accent);color:#fff;font-weight:600}
+  .mock-main{padding:20px 22px;overflow:hidden}
+  .mock-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .mock-h strong{font-size:1.02rem}
+  .tag{font-size:.7rem;padding:2px 8px;border-radius:5px;font-weight:700;border:1px solid var(--line);color:var(--muted)}
+  .tag.rel{background:rgba(31,157,85,.12);color:var(--ok);border-color:transparent}
+  .tag.wip{background:rgba(196,127,10,.14);color:var(--warn);border-color:transparent}
+  .tag.asm{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  table.bom{width:100%;border-collapse:collapse;font-size:.83rem;margin-top:14px}
+  table.bom th{text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:700}
+  table.bom td{padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.bom .pn{color:var(--accent);font-weight:600}
+  .ind1{padding-left:22px !important}
+  .ind2{padding-left:40px !important}
+  @media(max-width:700px){.mock-body{grid-template-columns:1fr}.mock-side{display:none}.mock-main{padding:14px}table.bom .hide-s{display:none}}
+
+  /* grids */
+  .grid{display:grid;gap:18px;margin-top:34px}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(228px,1fr))}
+  .card{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:var(--bg)}
+  .card p{color:var(--muted);font-size:.93rem;margin:0}
+  .ico{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:13px;font-size:17px}
+  ul.check{list-style:none;padding:0;margin:0}
+  ul.check li{position:relative;padding-left:26px;margin-bottom:9px;color:var(--muted);font-size:.94rem}
+  ul.check li::before{content:"✓";position:absolute;left:0;top:-1px;color:var(--ok);font-weight:800}
+
+  /* demo callout */
+  .demo-box{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:24px;background:var(--bg);display:flex;gap:26px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+  .creds{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;background:var(--bg-alt);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}
+  .creds div{white-space:nowrap}
+
+  /* stack */
+  .stack{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .chip{border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:.86rem;color:var(--muted);background:var(--bg)}
+  .chip b{color:var(--text);font-weight:600}
+
+  footer{background:var(--bg-deep);color:#9fb3cd;padding:52px 0 34px;border-top:1px solid var(--line)}
+  footer h4{color:#fff;font-size:.86rem;text-transform:uppercase;letter-spacing:.07em;margin:0 0 12px}
+  footer a{color:#c3d3e8;font-size:.92rem;display:block;margin-bottom:8px}
+  .foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:40px}
+  @media(max-width:760px){.foot-grid{grid-template-columns:1fr;gap:28px}}
+  .foot-bot{border-top:1px solid rgba(255,255,255,.1);margin-top:34px;padding-top:20px;font-size:.85rem;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><span class="mark">T</span> TurboPLM</a>
+    <nav class="nav-links">
+      <a href="#capabilities">Capabilities</a>
+      <a href="#change">Change control</a>
+      <a href="#demo">Live demo</a>
+      <a href="#selfhosted">Self-hosted</a>
+      <a href="#consulting">Consulting</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="https://github.com/horatiumm-creator/turboplm">View on GitHub</a>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Self-hosted product lifecycle management</div>
+    <h1>Your product structure, under your control</h1>
+    <p class="lede">
+      TurboPLM manages the things a hardware team actually lives in: the part master, the
+      multi-level bill of materials, revisions and their lifecycles, manufacturing
+      processes, and the engineering change control that keeps all of it honest.
+      It runs on your own hardware, in Docker, with one command.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/horatiumm-creator/turboplm">View on GitHub</a>
+      <a class="btn btn-ghost" href="#demo">Try the live demo</a>
+      <a class="btn btn-ghost" href="#consulting">Get expert help</a>
+    </div>
+    <div class="badges">
+      <span class="badge">Docker Compose</span>
+      <span class="badge">Postgres</span>
+      <span class="badge">No vendor lock-in</span>
+      <span class="badge">FSL-1.1-MIT</span>
+    </div>
+
+    <div class="mock" aria-label="Illustration of the TurboPLM bill-of-materials view">
+      <div class="mock-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="mock-url">turboplm.com/parts/1</span>
+      </div>
+      <div class="mock-body">
+        <div class="mock-side">
+          <b><span class="mark" style="width:20px;height:20px;font-size:11px;border-radius:6px">T</span> TurboPLM</b>
+          <span>Dashboard</span>
+          <span>My Work</span>
+          <span class="on">Parts</span>
+          <span>Changes</span>
+          <span>Requirements</span>
+          <span>BOM Compare</span>
+          <span>Quality</span>
+          <span>Projects</span>
+        </div>
+        <div class="mock-main">
+          <div class="mock-h">
+            <strong>DRN-1000 — TurboDrone X1 Quadcopter</strong>
+            <span class="tag asm">Assembly</span>
+            <span class="tag rel">Released</span>
+          </div>
+          <div style="font-size:.8rem;color:var(--muted)">Revision A · bill of materials</div>
+          <table class="bom">
+            <thead>
+              <tr><th>Part</th><th class="hide-s">Find</th><th>Qty</th><th>Rev</th><th class="hide-s">State</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="pn">ASM-1100</span> Frame Assembly</td><td class="hide-s">10</td><td>1</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">MEC-2001</span> Carbon Fiber Arm</td><td class="hide-s">10</td><td>4</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">PUR-4001</span> M3×8 Cap Screw</td><td class="hide-s">40</td><td>16</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td><span class="pn">ASM-1120</span> Power Module Assembly</td><td class="hide-s">30</td><td>1</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">ASM-1121</span> Battery Pack Assembly</td><td class="hide-s">10</td><td>1</td><td>B</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind2"><span class="pn">PUR-4005</span> Li-ion Cell 18650</td><td class="hide-s">10</td><td>8</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td><span class="pn">ELE-3007</span> LED Navigation Light Set</td><td class="hide-s">50</td><td>1</td><td>A</td><td class="hide-s"><span class="tag wip">In Work</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="capabilities">
+  <div class="wrap">
+    <div class="eyebrow">Capabilities</div>
+    <h2>Everything a product record needs</h2>
+    <p class="lede">Not a document dump with a parts list bolted on — a real product data model with the rules enforced on the server.</p>
+    <div class="grid g3">
+      <div class="card">
+        <div class="ico">◫</div>
+        <h3>Parts &amp; revisions</h3>
+        <p>Lettered revisions with a lifecycle state machine — In Work, In Review, Released, Obsolete. Released revisions are immutable, enforced server-side, not by convention.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⌗</div>
+        <h3>Multi-level eBOM</h3>
+        <p>Find numbers, quantities, units, reference designators, an indented structure tree, cycle prevention and where-used. Children resolve to their latest released revision.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⚙</div>
+        <h3>Manufacturing processes</h3>
+        <p>Per-revision routings: sequenced operations with work centers and setup/run times, each consuming materials — the mBOM alongside the engineering one.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⇄</div>
+        <h3>BOM compare &amp; baselines</h3>
+        <p>Diff any two revisions — or two entirely different products — as one aligned tree. Freeze a structure as a named baseline and compare baselines to each other.</p>
+      </div>
+      <div class="card">
+        <div class="ico">◇</div>
+        <h3>Effectivity, alternates, variants</h3>
+        <p>Date-effective BOM lines with an “as of” view, substitute parts per line, and option-driven variants resolved by a configurator.</p>
+      </div>
+      <div class="card">
+        <div class="ico">◈</div>
+        <h3>CAD &amp; documents</h3>
+        <p>Versioned documents linked to parts, revisions and changes, with in-browser 3D viewing of STEP, IGES, BREP, STL and glTF — converted server-side for instant loading.</p>
+      </div>
+      <div class="card">
+        <div class="ico">≡</div>
+        <h3>Requirements traceability</h3>
+        <p>Typed requirements with decomposition, linked to the parts that satisfy them and the documents that verify them, plus a coverage matrix.</p>
+      </div>
+      <div class="card">
+        <div class="ico">$</div>
+        <h3>Cost &amp; sourcing</h3>
+        <p>Unit costs rolled up through the BOM, approved manufacturer lists per part, and supplier RFQs with quote comparison and award tracking.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⌸</div>
+        <h3>Quality &amp; projects</h3>
+        <p>Nonconformances that escalate straight into a change, CAPAs with root-cause discipline, and phase-gate projects whose gates refuse to pass on open deliverables.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="change">
+  <div class="wrap">
+    <div class="eyebrow">The difference</div>
+    <h2>Change control that actually holds</h2>
+    <p class="lede">
+      Most lightweight tools let you edit a BOM and call it a day. TurboPLM treats a change
+      as a governed object, because that is the part auditors, customers and your own
+      future self care about.
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>A complete change chain</h3>
+        <ul class="check">
+          <li>Requests (ECR) raised against a part, triaged and accepted into a change notice</li>
+          <li>Change notices (ECN) carrying affected items, from → to revisions and effectivity dates</li>
+          <li>Stock disposition per part: use as is, rework, scrap, return to vendor</li>
+          <li>A printable change notice for the people on the shop floor</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Rules the server enforces</h3>
+        <ul class="check">
+          <li>A part can sit on only one active change at a time</li>
+          <li>Revisions under a change cannot be released behind its back</li>
+          <li>Releasing a change releases every one of its revisions atomically</li>
+          <li>Nothing releases while a child part is still unreleased</li>
+          <li>Every mutation lands in an audit trail with who, what and when</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Approvals that fit your process</h3>
+        <ul class="check">
+          <li>Flat reviewer sign-off, or a configurable multi-step workflow</li>
+          <li>Steps that need any one approver, or all of them</li>
+          <li>Assignees by named user or by role</li>
+          <li>Tasks queued in each reviewer’s inbox, with notifications</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Know the blast radius first</h3>
+        <ul class="check">
+          <li>Where-used rollup across every affected part before you approve</li>
+          <li>Side-by-side BOM diff of exactly what the change does</li>
+          <li>Requirement coverage so you see what a change puts at risk</li>
+          <li>Analytics on change cycle time and BOM health</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="demo">
+  <div class="wrap">
+    <div class="eyebrow">Live demo</div>
+    <h2>Try it on real data</h2>
+    <p class="lede">
+      A running instance, seeded with a four-level quadcopter product — two variants that
+      share subassemblies, released and in-work revisions, process plans, documents and
+      changes in flight. Sign in read-only and click around.
+    </p>
+    <div class="demo-box">
+      <div>
+        <h3 style="margin-bottom:6px">Read-only guest access</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0 0 16px">
+          The guest account can view everything and change nothing, so explore freely.
+        </p>
+        <a class="btn btn-primary" href="https://demo.turboplm.com">Open the live demo</a>
+      </div>
+      <div class="creds">
+        <div><strong>demo@turboplm.com</strong></div>
+        <div>PublicDemo2026!</div>
+      </div>
+    </div>
+    <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
+      Prefer your own copy? <code>git clone</code>, <code>docker compose up -d --build</code>,
+      and you have the same thing on your laptop in a couple of minutes — demo data included.
+    </p>
+  </div>
+</section>
+
+<section id="selfhosted">
+  <div class="wrap">
+    <div class="eyebrow">Self-hosted by design</div>
+    <h2>Your product data stays yours</h2>
+    <p class="lede">
+      Product structures, costs and supplier terms are among the most sensitive data a
+      hardware company has. TurboPLM is built to run where you decide.
+    </p>
+    <div class="grid g4">
+      <div class="card"><h3>No tenant, no metering</h3><p>Run it on a laptop, a NAS or a VM. No seat counts, no usage telemetry, no per-user tax on inviting a colleague.</p></div>
+      <div class="card"><h3>Plain Postgres</h3><p>Your data sits in a database you can query, dump and back up yourself — no proprietary store, no export fee.</p></div>
+      <div class="card"><h3>Open integration</h3><p>Scoped API keys, HMAC-signed webhooks, ERP-shaped item and BOM export, CSV import with dry-run validation.</p></div>
+      <div class="card"><h3>Readable source</h3><p>TypeScript end to end, a documented contract between the API and the client, and a schema you can extend.</p></div>
+    </div>
+    <div class="stack">
+      <span class="chip"><b>React 18</b> + Ant Design</span>
+      <span class="chip"><b>Node 20</b> + Express</span>
+      <span class="chip"><b>Prisma</b> ORM</span>
+      <span class="chip"><b>PostgreSQL 16</b></span>
+      <span class="chip"><b>OpenCascade</b> CAD kernel</span>
+      <span class="chip"><b>three.js</b> 3D viewer</span>
+      <span class="chip"><b>Docker Compose</b></span>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="consulting">
+  <div class="wrap">
+    <div class="eyebrow">Services</div>
+    <h2>Get expert help</h2>
+    <p class="lede">
+      The software is free to run. If you would rather not run it alone — or need it to fit
+      the way your team already works — that is where I come in.
+    </p>
+    <div class="grid g4">
+      <div class="card"><div class="ico">↥</div><h3>Implementation &amp; onboarding</h3><p>Deployment on your infrastructure, migrating your existing part and BOM data, and getting your team productive in it.</p></div>
+      <div class="card"><div class="ico">⚒</div><h3>Custom development</h3><p>Fields, workflows, reports and integrations specific to your products and process — built into the platform, not bolted beside it.</p></div>
+      <div class="card"><div class="ico">◎</div><h3>PLM advisory</h3><p>Part numbering, revision strategy, change process and release gates: the decisions that are expensive to revisit later.</p></div>
+      <div class="card"><div class="ico">◍</div><h3>ERP &amp; CAD integration</h3><p>Wiring TurboPLM to the systems around it — item and BOM sync, CAD exports, and the handoff to purchasing and production.</p></div>
+    </div>
+    <div class="demo-box" style="margin-top:30px">
+      <div>
+        <h3 style="margin-bottom:6px">Start a conversation</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0">
+          Tell me what you build and where your product data hurts. No obligation.
+        </p>
+      </div>
+      <a class="btn btn-primary" href="mailto:hello@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="color:#fff;margin-bottom:12px"><span class="mark">T</span> TurboPLM</div>
+        <p style="max-width:42ch;font-size:.92rem;color:#9fb3cd">
+          Self-hosted product lifecycle management for teams that build physical things —
+          product structure, BOM, revisioning and engineering change control.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#change">Change control</a>
+        <a href="#demo">Live demo</a>
+        <a href="#selfhosted">Self-hosted</a>
+      </div>
+      <div>
+        <h4>Resources</h4>
+        <a href="https://github.com/horatiumm-creator/turboplm">GitHub repository</a>
+        <a href="https://github.com/horatiumm-creator/turboplm#quick-start">Quick start</a>
+        <a href="https://github.com/horatiumm-creator/turboplm/issues">Issues &amp; requests</a>
+        <a href="#consulting">Consulting</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <span>© 2026 TurboPLM</span>
+      <span>Source available under the Functional Source License (FSL-1.1-MIT) — converts to MIT after two years.</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
