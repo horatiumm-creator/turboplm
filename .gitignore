@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Local configuration & secrets — commit .env.example instead
+.env
+.env.local
+.env.*.local
+
+# Uploaded files (documents, CAD models) and generated derivatives
+uploads/
+backend/uploads/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,64 @@
+name: turboplm
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: turboplm
+      POSTGRES_PASSWORD: turboplm
+      POSTGRES_DB: turboplm
+    ports:
+      - "5442:5432"
+    volumes:
+      - turboplm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U turboplm -d turboplm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://turboplm:turboplm@db:5432/turboplm
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      PORT: "4000"
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3010}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      UPLOAD_DIR: /app/uploads
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-25mb}
+      WEBHOOK_BLOCK_PRIVATE_HOSTS: ${WEBHOOK_BLOCK_PRIVATE_HOSTS:-false}
+      CAD_SERVICE_URL: ${CAD_SERVICE_URL:-http://cad:4100}
+    ports:
+      - "8010:4000"
+    volumes:
+      - turboplm-uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  cad:
+    build: ./cad
+    environment:
+      UPLOAD_DIR: /app/uploads
+      PORT: "4100"
+    volumes:
+      - turboplm-uploads:/app/uploads
+
+  web:
+    build: ./frontend
+    ports:
+      - "3010:80"
+    depends_on:
+      - api
+
+volumes:
+  turboplm-pgdata:
+  turboplm-uploads:

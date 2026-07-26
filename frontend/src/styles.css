@@ -1,0 +1,23 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: #f2f4f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* BOM compare row tints */
+.compare-row-added > td {
+  background: #f6ffed !important;
+}
+.compare-row-removed > td {
+  background: #fff1f0 !important;
+}
+.compare-row-changed > td {
+  background: #fffbe6 !important;
+}

@@ -1,0 +1,967 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
+enum Role {
+  ADMIN
+  ENGINEER
+  VIEWER
+}
+
+enum PartCategory {
+  ASSEMBLY
+  MECHANICAL
+  ELECTRICAL
+  PURCHASED
+  RAW_MATERIAL
+  SOFTWARE
+}
+
+enum Lifecycle {
+  IN_WORK
+  IN_REVIEW
+  RELEASED
+  OBSOLETE
+}
+
+enum EcnStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  RELEASED
+  CANCELLED
+}
+
+enum EcnPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EcnDisposition {
+  USE_AS_IS
+  REWORK
+  SCRAP
+  RETURN_TO_VENDOR
+}
+
+enum EcnReviewDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DocumentCategory {
+  DRAWING
+  SPECIFICATION
+  DATASHEET
+  CAD_MODEL
+  IMAGE
+  OTHER
+}
+
+enum EcrStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+}
+
+enum AmlStatus {
+  PREFERRED
+  APPROVED
+  ALTERNATE
+  OBSOLETE
+}
+
+enum AttributeType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  LIST
+}
+
+model User {
+  id               Int                    @id @default(autoincrement())
+  email            String                 @unique
+  name             String
+  passwordHash     String?
+  provider         AuthProvider           @default(LOCAL)
+  googleId         String?                @unique
+  avatarUrl        String?
+  role             Role                   @default(ENGINEER)
+  createdAt        DateTime               @default(now())
+  createdParts     Part[]
+  createdRevisions PartRevision[]
+  createdEcns      Ecn[]                  @relation("EcnCreatedBy")
+  approvedEcns     Ecn[]                  @relation("EcnApprovedBy")
+  ecnReviews       EcnReview[]
+  documents        Document[]
+  documentVersions DocumentVersion[]
+  createdEcrs      Ecr[]                  @relation("EcrCreatedBy")
+  resolvedEcrs     Ecr[]                  @relation("EcrResolvedBy")
+  baselines        Baseline[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  requirements     Requirement[]          @relation("ReqCreatedBy")
+  stepAssignments  WorkflowStepAssignee[]
+  workflowTasks    WorkflowTask[]
+  apiKeys          ApiKey[]
+  webhooks         Webhook[]
+  ncrsCreated      Nonconformance[]       @relation("NcrCreatedBy")
+  ncrsClosed       Nonconformance[]       @relation("NcrClosedBy")
+  capasOwned       CorrectiveAction[]     @relation("CapaOwner")
+  capasCreated     CorrectiveAction[]     @relation("CapaCreatedBy")
+  projectsOwned    Project[]              @relation("ProjectOwner")
+  projectsCreated  Project[]              @relation("ProjectCreatedBy")
+  phasesPassed     ProjectPhase[]         @relation("PhasePassedBy")
+  deliverables     ProjectDeliverable[]   @relation("DeliverableOwner")
+  rfqs             Rfq[]
+}
+
+model Part {
+  id                 Int                  @id @default(autoincrement())
+  partNumber         String               @unique
+  name               String
+  description        String?
+  category           PartCategory         @default(MECHANICAL)
+  uom                String               @default("ea")
+  createdById        Int
+  createdBy          User                 @relation(fields: [createdById], references: [id])
+  unitCost           Float?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  revisions          PartRevision[]
+  usedIn             BomLine[]
+  operationMaterials OperationMaterial[]
+  ecnItems           EcnItem[]
+  documentLinks      DocumentLink[]
+  ecrs               Ecr[]
+  manufacturerParts  ManufacturerPart[]
+  attributeValues    PartAttributeValue[]
+  baselineLines      BaselineLine[]
+  alternateFor       BomLineAlternate[]
+  requirementLinks   RequirementLink[]
+  optionGroups       OptionGroup[]
+  nonconformances    Nonconformance[]
+  deliverables       ProjectDeliverable[]
+  rfqLines           RfqLine[]
+}
+
+model PartRevision {
+  id              Int              @id @default(autoincrement())
+  partId          Int
+  part            Part             @relation(fields: [partId], references: [id], onDelete: Cascade)
+  revision        String
+  lifecycle       Lifecycle        @default(IN_WORK)
+  changeNote      String?
+  createdById     Int
+  createdBy       User             @relation(fields: [createdById], references: [id])
+  createdAt       DateTime         @default(now())
+  releasedAt      DateTime?
+  bomLines        BomLine[]
+  processPlan     ProcessPlan?
+  ecnItemFrom     EcnItem[]        @relation("EcnItemFrom")
+  ecnItemsTo      EcnItem[]        @relation("EcnItemTo")
+  documentLinks   DocumentLink[]
+  baselines       Baseline[]
+  nonconformances Nonconformance[]
+
+  @@unique([partId, revision])
+  @@index([partId])
+}
+
+model Ecn {
+  id              Int                  @id @default(autoincrement())
+  ecnNumber       String               @unique
+  title           String
+  description     String?
+  reason          String?
+  priority        EcnPriority          @default(MEDIUM)
+  status          EcnStatus            @default(DRAFT)
+  effectivityDate DateTime?
+  createdById     Int
+  createdBy       User                 @relation("EcnCreatedBy", fields: [createdById], references: [id])
+  approvedById    Int?
+  approvedBy      User?                @relation("EcnApprovedBy", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  releasedAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  items           EcnItem[]
+  reviews         EcnReview[]
+  documentLinks   DocumentLink[]
+  ecrs            Ecr[]
+  workflow        EcnWorkflow?
+  nonconformances Nonconformance[]
+  deliverables    ProjectDeliverable[]
+}
+
+model Document {
+  id               Int                  @id @default(autoincrement())
+  docNumber        String               @unique
+  title            String
+  category         DocumentCategory     @default(OTHER)
+  description      String?
+  createdById      Int
+  createdBy        User                 @relation(fields: [createdById], references: [id])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  versions         DocumentVersion[]
+  links            DocumentLink[]
+  requirementLinks RequirementLink[]
+  deliverables     ProjectDeliverable[]
+}
+
+enum ConversionStatus {
+  SKIPPED
+  PENDING
+  DONE
+  FAILED
+}
+
+model DocumentVersion {
+  id               Int              @id @default(autoincrement())
+  documentId       Int
+  document         Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version          Int
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  storagePath      String
+  note             String?
+  uploadedById     Int
+  uploadedBy       User             @relation(fields: [uploadedById], references: [id])
+  createdAt        DateTime         @default(now())
+  conversionStatus ConversionStatus @default(SKIPPED)
+  conversionError  String?
+  glbPath          String?
+  triangleCount    Int?
+  boundingBox      Json?
+
+  @@unique([documentId, version])
+  @@index([conversionStatus])
+}
+
+model DocumentLink {
+  id             Int           @id @default(autoincrement())
+  documentId     Int
+  document       Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  partId         Int?
+  part           Part?         @relation(fields: [partId], references: [id], onDelete: Cascade)
+  partRevisionId Int?
+  partRevision   PartRevision? @relation(fields: [partRevisionId], references: [id], onDelete: Cascade)
+  ecnId          Int?
+  ecn            Ecn?          @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@index([partId])
+  @@index([partRevisionId])
+  @@index([ecnId])
+  @@index([documentId])
+}
+
+model Ecr {
+  id           Int         @id @default(autoincrement())
+  ecrNumber    String      @unique
+  title        String
+  description  String?
+  priority     EcnPriority @default(MEDIUM)
+  status       EcrStatus   @default(OPEN)
+  partId       Int?
+  part         Part?       @relation(fields: [partId], references: [id])
+  ecnId        Int?
+  ecn          Ecn?        @relation(fields: [ecnId], references: [id])
+  resolution   String?
+  createdById  Int
+  createdBy    User        @relation("EcrCreatedBy", fields: [createdById], references: [id])
+  resolvedById Int?
+  resolvedBy   User?       @relation("EcrResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Manufacturer {
+  id        Int                @id @default(autoincrement())
+  name      String             @unique
+  website   String?
+  createdAt DateTime           @default(now())
+  parts     ManufacturerPart[]
+}
+
+model ManufacturerPart {
+  id             Int          @id @default(autoincrement())
+  manufacturerId Int
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id])
+  partId         Int
+  part           Part         @relation(fields: [partId], references: [id], onDelete: Cascade)
+  mpn            String
+  status         AmlStatus    @default(APPROVED)
+  description    String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([partId, manufacturerId, mpn])
+  @@index([partId])
+}
+
+model Baseline {
+  id             Int            @id @default(autoincrement())
+  name           String
+  description    String?
+  partRevisionId Int
+  partRevision   PartRevision   @relation(fields: [partRevisionId], references: [id], onDelete: Cascade)
+  createdById    Int
+  createdBy      User           @relation(fields: [createdById], references: [id])
+  createdAt      DateTime       @default(now())
+  lines          BaselineLine[]
+}
+
+model BaselineLine {
+  id             Int            @id @default(autoincrement())
+  baselineId     Int
+  baseline       Baseline       @relation(fields: [baselineId], references: [id], onDelete: Cascade)
+  parentLineId   Int?
+  parentLine     BaselineLine?  @relation("BaselineTree", fields: [parentLineId], references: [id], onDelete: Cascade)
+  children       BaselineLine[] @relation("BaselineTree")
+  partId         Int
+  part           Part           @relation(fields: [partId], references: [id])
+  revisionLabel  String
+  findNumber     Int
+  quantity       Float
+  uom            String
+  refDesignators String?
+  sortOrder      Int            @default(0)
+
+  @@index([baselineId])
+}
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  emailedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@index([emailedAt, createdAt])
+}
+
+enum RequirementType {
+  FUNCTIONAL
+  PERFORMANCE
+  SAFETY
+  REGULATORY
+  INTERFACE
+}
+
+enum RequirementStatus {
+  DRAFT
+  APPROVED
+  OBSOLETE
+}
+
+model Requirement {
+  id           Int                  @id @default(autoincrement())
+  reqNumber    String               @unique
+  title        String
+  statement    String
+  type         RequirementType      @default(FUNCTIONAL)
+  priority     EcnPriority          @default(MEDIUM)
+  status       RequirementStatus    @default(DRAFT)
+  rationale    String?
+  acceptance   String?
+  parentId     Int?
+  parent       Requirement?         @relation("ReqTree", fields: [parentId], references: [id])
+  children     Requirement[]        @relation("ReqTree")
+  createdById  Int
+  createdBy    User                 @relation("ReqCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  links        RequirementLink[]
+  deliverables ProjectDeliverable[]
+
+  @@index([parentId])
+}
+
+model RequirementLink {
+  id            Int         @id @default(autoincrement())
+  requirementId Int
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  partId        Int?
+  part          Part?       @relation(fields: [partId], references: [id], onDelete: Cascade)
+  documentId    Int?
+  document      Document?   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@index([requirementId])
+  @@index([partId])
+  @@index([documentId])
+}
+
+enum WorkflowRule {
+  ANY
+  ALL
+}
+
+enum WorkflowStatus {
+  RUNNING
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum TaskDecision {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+model WorkflowTemplate {
+  id          Int               @id @default(autoincrement())
+  name        String            @unique
+  description String?
+  active      Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  steps       WorkflowStepDef[]
+  instances   EcnWorkflow[]
+}
+
+model WorkflowStepDef {
+  id         Int                    @id @default(autoincrement())
+  templateId Int
+  template   WorkflowTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  seq        Int
+  name       String
+  rule       WorkflowRule           @default(ALL)
+  role       Role?
+  assignees  WorkflowStepAssignee[]
+
+  @@unique([templateId, seq])
+}
+
+model WorkflowStepAssignee {
+  id        Int             @id @default(autoincrement())
+  stepDefId Int
+  stepDef   WorkflowStepDef @relation(fields: [stepDefId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([stepDefId, userId])
+}
+
+model EcnWorkflow {
+  id           Int              @id @default(autoincrement())
+  ecnId        Int              @unique
+  ecn          Ecn              @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  templateId   Int
+  template     WorkflowTemplate @relation(fields: [templateId], references: [id])
+  templateName String
+  status       WorkflowStatus   @default(RUNNING)
+  currentSeq   Int              @default(1)
+  createdAt    DateTime         @default(now())
+  completedAt  DateTime?
+  tasks        WorkflowTask[]
+}
+
+model WorkflowTask {
+  id         Int          @id @default(autoincrement())
+  workflowId Int
+  workflow   EcnWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  seq        Int
+  stepName   String
+  rule       WorkflowRule
+  userId     Int
+  user       User         @relation(fields: [userId], references: [id])
+  decision   TaskDecision @default(PENDING)
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime     @default(now())
+
+  @@index([userId, decision])
+  @@index([workflowId, seq])
+}
+
+model ApiKey {
+  id          Int       @id @default(autoincrement())
+  name        String
+  prefix      String    @unique
+  keyHash     String
+  scopes      String    @default("read")
+  createdById Int
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Webhook {
+  id          Int               @id @default(autoincrement())
+  name        String
+  url         String
+  secret      String
+  events      String
+  active      Boolean           @default(true)
+  createdById Int
+  createdBy   User              @relation(fields: [createdById], references: [id])
+  createdAt   DateTime          @default(now())
+  deliveries  WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id           Int                   @id @default(autoincrement())
+  webhookId    Int
+  webhook      Webhook               @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event        String
+  payload      Json
+  status       WebhookDeliveryStatus @default(PENDING)
+  attempts     Int                   @default(0)
+  responseCode Int?
+  error        String?
+  createdAt    DateTime              @default(now())
+  deliveredAt  DateTime?
+
+  @@index([webhookId, createdAt])
+  @@index([status, createdAt])
+}
+
+model OptionGroup {
+  id          Int           @id @default(autoincrement())
+  partId      Int
+  part        Part          @relation(fields: [partId], references: [id], onDelete: Cascade)
+  code        String
+  name        String
+  description String?
+  required    Boolean       @default(true)
+  multiSelect Boolean       @default(false)
+  sortOrder   Int           @default(0)
+  values      OptionValue[]
+
+  @@unique([partId, code])
+  @@index([partId])
+}
+
+model OptionValue {
+  id        Int             @id @default(autoincrement())
+  groupId   Int
+  group     OptionGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  isDefault Boolean         @default(false)
+  sortOrder Int             @default(0)
+  bomLines  BomLineOption[]
+
+  @@unique([groupId, code])
+}
+
+model BomLineOption {
+  id            Int         @id @default(autoincrement())
+  bomLineId     Int
+  bomLine       BomLine     @relation(fields: [bomLineId], references: [id], onDelete: Cascade)
+  optionValueId Int
+  optionValue   OptionValue @relation(fields: [optionValueId], references: [id], onDelete: Cascade)
+
+  @@unique([bomLineId, optionValueId])
+  @@index([optionValueId])
+}
+
+// ---------------------------------------------------------------------------
+// Quality: nonconformance + corrective action
+// ---------------------------------------------------------------------------
+
+enum NcrStatus {
+  OPEN
+  CONTAINED
+  CLOSED
+}
+
+enum NcrSeverity {
+  MINOR
+  MAJOR
+  CRITICAL
+}
+
+enum CapaStatus {
+  OPEN
+  IN_PROGRESS
+  VERIFIED
+  CLOSED
+}
+
+model Nonconformance {
+  id               Int               @id @default(autoincrement())
+  ncrNumber        String            @unique
+  title            String
+  description      String
+  severity         NcrSeverity       @default(MINOR)
+  status           NcrStatus         @default(OPEN)
+  disposition      EcnDisposition?
+  quantityAffected Float?
+  lotOrSerial      String?
+  partId           Int?
+  part             Part?             @relation(fields: [partId], references: [id])
+  partRevisionId   Int?
+  partRevision     PartRevision?     @relation(fields: [partRevisionId], references: [id])
+  ecnId            Int?
+  ecn              Ecn?              @relation(fields: [ecnId], references: [id])
+  capaId           Int?
+  capa             CorrectiveAction? @relation(fields: [capaId], references: [id])
+  createdById      Int
+  createdBy        User              @relation("NcrCreatedBy", fields: [createdById], references: [id])
+  closedById       Int?
+  closedBy         User?             @relation("NcrClosedBy", fields: [closedById], references: [id])
+  closedAt         DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([partId])
+  @@index([capaId])
+}
+
+model CorrectiveAction {
+  id               Int              @id @default(autoincrement())
+  capaNumber       String           @unique
+  title            String
+  problem          String
+  rootCause        String?
+  containment      String?
+  correctiveAction String?
+  preventiveAction String?
+  status           CapaStatus       @default(OPEN)
+  ownerId          Int
+  owner            User             @relation("CapaOwner", fields: [ownerId], references: [id])
+  dueDate          DateTime?
+  verifiedAt       DateTime?
+  closedAt         DateTime?
+  createdById      Int
+  createdBy        User             @relation("CapaCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  nonconformances  Nonconformance[]
+}
+
+// ---------------------------------------------------------------------------
+// Phase-gate projects
+// ---------------------------------------------------------------------------
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum GateStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  PASSED
+  BLOCKED
+}
+
+enum DeliverableStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  WAIVED
+}
+
+model Project {
+  id          Int            @id @default(autoincrement())
+  code        String         @unique
+  name        String
+  description String?
+  status      ProjectStatus  @default(PLANNING)
+  startDate   DateTime?
+  targetDate  DateTime?
+  ownerId     Int
+  owner       User           @relation("ProjectOwner", fields: [ownerId], references: [id])
+  createdById Int
+  createdBy   User           @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  phases      ProjectPhase[]
+}
+
+model ProjectPhase {
+  id           Int                  @id @default(autoincrement())
+  projectId    Int
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  seq          Int
+  name         String
+  gateCriteria String?
+  status       GateStatus           @default(NOT_STARTED)
+  targetDate   DateTime?
+  passedAt     DateTime?
+  passedById   Int?
+  passedBy     User?                @relation("PhasePassedBy", fields: [passedById], references: [id])
+  deliverables ProjectDeliverable[]
+
+  @@unique([projectId, seq])
+}
+
+model ProjectDeliverable {
+  id            Int               @id @default(autoincrement())
+  phaseId       Int
+  phase         ProjectPhase      @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  name          String
+  status        DeliverableStatus @default(PENDING)
+  required      Boolean           @default(true)
+  ownerId       Int?
+  owner         User?             @relation("DeliverableOwner", fields: [ownerId], references: [id])
+  dueDate       DateTime?
+  partId        Int?
+  part          Part?             @relation(fields: [partId], references: [id])
+  documentId    Int?
+  document      Document?         @relation(fields: [documentId], references: [id])
+  requirementId Int?
+  requirement   Requirement?      @relation(fields: [requirementId], references: [id])
+  ecnId         Int?
+  ecn           Ecn?              @relation(fields: [ecnId], references: [id])
+  notes         String?
+
+  @@index([phaseId])
+}
+
+// ---------------------------------------------------------------------------
+// Supplier collaboration / RFQ
+// ---------------------------------------------------------------------------
+
+enum RfqStatus {
+  DRAFT
+  SENT
+  CLOSED
+  AWARDED
+  CANCELLED
+}
+
+model Supplier {
+  id           Int        @id @default(autoincrement())
+  code         String     @unique
+  name         String
+  contactName  String?
+  contactEmail String?
+  notes        String?
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  quotes       RfqQuote[]
+  awards       RfqLine[]  @relation("AwardedSupplier")
+}
+
+model Rfq {
+  id          Int       @id @default(autoincrement())
+  rfqNumber   String    @unique
+  title       String
+  description String?
+  status      RfqStatus @default(DRAFT)
+  dueDate     DateTime?
+  sentAt      DateTime?
+  closedAt    DateTime?
+  createdById Int
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lines       RfqLine[]
+}
+
+model RfqLine {
+  id                Int        @id @default(autoincrement())
+  rfqId             Int
+  rfq               Rfq        @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  partId            Int
+  part              Part       @relation(fields: [partId], references: [id])
+  quantity          Float      @default(1)
+  targetPrice       Float?
+  notes             String?
+  awardedSupplierId Int?
+  awardedSupplier   Supplier?  @relation("AwardedSupplier", fields: [awardedSupplierId], references: [id])
+  awardedAt         DateTime?
+  quotes            RfqQuote[]
+
+  @@unique([rfqId, partId])
+}
+
+model RfqQuote {
+  id           Int      @id @default(autoincrement())
+  rfqLineId    Int
+  rfqLine      RfqLine  @relation(fields: [rfqLineId], references: [id], onDelete: Cascade)
+  supplierId   Int
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  unitPrice    Float
+  currency     String   @default("USD")
+  leadTimeDays Int?
+  moq          Float?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@unique([rfqLineId, supplierId])
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  user       User?    @relation(fields: [userId], references: [id])
+  method     String
+  path       String
+  entityType String?
+  entityId   Int?
+  summary    String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model AttributeDef {
+  id        Int                  @id @default(autoincrement())
+  category  PartCategory
+  name      String
+  label     String
+  type      AttributeType        @default(TEXT)
+  options   String?
+  required  Boolean              @default(false)
+  sortOrder Int                  @default(0)
+  values    PartAttributeValue[]
+
+  @@unique([category, name])
+}
+
+model PartAttributeValue {
+  id             Int          @id @default(autoincrement())
+  partId         Int
+  part           Part         @relation(fields: [partId], references: [id], onDelete: Cascade)
+  attributeDefId Int
+  attributeDef   AttributeDef @relation(fields: [attributeDefId], references: [id], onDelete: Cascade)
+  value          String
+
+  @@unique([partId, attributeDefId])
+}
+
+model EcnReview {
+  id         Int               @id @default(autoincrement())
+  ecnId      Int
+  ecn        Ecn               @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  reviewerId Int
+  reviewer   User              @relation(fields: [reviewerId], references: [id])
+  decision   EcnReviewDecision @default(PENDING)
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime          @default(now())
+
+  @@unique([ecnId, reviewerId])
+}
+
+model EcnItem {
+  id                Int            @id @default(autoincrement())
+  ecnId             Int
+  ecn               Ecn            @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  partId            Int
+  part              Part           @relation(fields: [partId], references: [id])
+  fromRevisionId    Int?
+  fromRevision      PartRevision?  @relation("EcnItemFrom", fields: [fromRevisionId], references: [id])
+  toRevisionId      Int?
+  toRevision        PartRevision?  @relation("EcnItemTo", fields: [toRevisionId], references: [id])
+  changeDescription String?
+  disposition       EcnDisposition @default(USE_AS_IS)
+
+  @@unique([ecnId, partId])
+  @@index([partId])
+  @@index([toRevisionId])
+}
+
+model BomLine {
+  id               Int                @id @default(autoincrement())
+  parentRevisionId Int
+  parentRevision   PartRevision       @relation(fields: [parentRevisionId], references: [id], onDelete: Cascade)
+  childPartId      Int
+  childPart        Part               @relation(fields: [childPartId], references: [id])
+  findNumber       Int
+  quantity         Float              @default(1)
+  uom              String             @default("ea")
+  refDesignators   String?
+  notes            String?
+  effectiveFrom    DateTime?
+  effectiveTo      DateTime?
+  alternates       BomLineAlternate[]
+  optionConditions BomLineOption[]
+
+  @@unique([parentRevisionId, findNumber])
+  @@unique([parentRevisionId, childPartId])
+  @@index([childPartId])
+}
+
+model BomLineAlternate {
+  id              Int     @id @default(autoincrement())
+  bomLineId       Int
+  bomLine         BomLine @relation(fields: [bomLineId], references: [id], onDelete: Cascade)
+  alternatePartId Int
+  alternatePart   Part    @relation(fields: [alternatePartId], references: [id])
+  note            String?
+
+  @@unique([bomLineId, alternatePartId])
+}
+
+model ProcessPlan {
+  id             Int          @id @default(autoincrement())
+  partRevisionId Int          @unique
+  partRevision   PartRevision @relation(fields: [partRevisionId], references: [id], onDelete: Cascade)
+  name           String       @default("Manufacturing Process")
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  operations     Operation[]
+}
+
+model Operation {
+  id           Int                 @id @default(autoincrement())
+  planId       Int
+  plan         ProcessPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  seq          Int
+  name         String
+  workCenter   String?
+  description  String?
+  setupMinutes Float               @default(0)
+  runMinutes   Float               @default(0)
+  materials    OperationMaterial[]
+
+  @@unique([planId, seq])
+}
+
+model OperationMaterial {
+  id          Int       @id @default(autoincrement())
+  operationId Int
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  partId      Int
+  part        Part      @relation(fields: [partId], references: [id])
+  quantity    Float     @default(1)
+  uom         String    @default("ea")
+  notes       String?
+
+  @@index([partId])
+}
