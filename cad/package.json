@@ -1,6 +1,7 @@
 {
   "name": "turboplm-cad",
   "version": "0.1.0",
+  "license": "FSL-1.1-MIT",
   "private": true,
   "type": "module",
   "main": "src/index.js",
