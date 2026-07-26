@@ -11,9 +11,9 @@ and Siemens Teamcenter — product structure, bills of material, part revisionin
 manufacturing processes and full engineering change control. Web client only, fully
 dockerized, runs on your laptop with one command.
 
-> **Note:** TurboPLM is a working, functional system with a large feature surface, but it
-> is a young project — see [Project status](#project-status) for what is and isn't
-> finished before you rely on it.
+> **Note:** TurboPLM is a young project under active development. It runs and the
+> features below work, but treat it as pre-1.0: review the Deployment Notes before
+> putting it anywhere that matters.
 
 ---
 
@@ -314,26 +314,6 @@ turboplm/
 └── cad/
     └── src/                  # OpenCascade WASM service + glTF encoder
 ```
-
----
-
-## Project status
-
-TurboPLM is actively being built. What works has been exercised end-to-end against the
-running stack; the gaps below are known and deliberate rather than hidden:
-
-**Solid** — parts, revisions and lifecycles; multi-level BOM with effectivity, alternates
-and variants; process plans; BOM compare and baselines; ECR → ECN change management with
-reviewers, the workflow engine, impact and atomic release; documents and the CAD viewer;
-RBAC, audit, notifications, search, My Work; API keys, webhooks, ERP exchange, analytics;
-requirements traceability.
-
-**Backend only (no UI yet)** — the quality (NCR/CAPA), phase-gate project and supplier
-RFQ modules are complete and tested over the API, but their pages are not built. The
-page-level specs are pinned in `CONTRACTS.md` under *Final tier (iteration 9) → Frontend*.
-
-**Not started** — automated test suite (verification so far is API-level and manual),
-CI, and per-object access control finer than the three roles.
 
 ---
 

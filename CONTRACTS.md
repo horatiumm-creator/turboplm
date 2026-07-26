@@ -1,9 +1,10 @@
-# TurboPLM — API & Component Contracts (iteration 1)
+# TurboPLM — API & Component Contracts
 
 This file is the single source of truth for how the backend and frontend fit together.
 DTO shapes live in `frontend/src/api/types.ts` and the typed HTTP client in
-`frontend/src/api/client.ts` — both are already written and MUST NOT be changed by
-implementation agents. Backend routes must produce exactly the shapes in `types.ts`.
+`frontend/src/api/client.ts`. Those two files are the pinned wire format: backend routes
+must produce exactly the shapes in `types.ts`, and changing a shape means changing both
+sides plus this document in the same commit.
 
 ## General conventions
 
@@ -61,7 +62,7 @@ plus `IN_REVIEW → (reject) → IN_WORK`. `approve` sets `releasedAt`.
 
 ## Endpoints
 
-Auth (already implemented in `backend/src/routes/auth.ts` — do not modify):
+Auth (`backend/src/routes/auth.ts`):
 | Method/Path | Body → Response |
 |---|---|
 | POST /api/auth/register | {name,email,password} → UserInfo (sets cookie) |
@@ -71,7 +72,7 @@ Auth (already implemented in `backend/src/routes/auth.ts` — do not modify):
 | GET /api/auth/providers | → {google: boolean} |
 | GET /api/auth/google, /google/callback | OAuth redirect flow |
 
-Feature routers (to implement; mounted at `/api` in `src/index.ts`):
+Feature routers (mounted at `/api` in `src/index.ts`):
 
 `src/routes/parts.ts`:
 | Method/Path | Body → Response |
@@ -132,7 +133,7 @@ Feature routers (to implement; mounted at `/api` in `src/index.ts`):
 - Routes: `/login`, `/register`, `/` (Dashboard), `/parts`, `/parts/:id` (+ `?rev=<revisionId>`
   to select a revision). Part links go to `/parts/${id}`.
 
-### Component prop contracts (PartDetail composes tabs from other agents)
+### Component prop contracts (PartDetail composes these tabs)
 
 ```tsx
 // frontend/src/components/part/BomTab.tsx
@@ -146,7 +147,7 @@ export default function ProcessTab(props: { revision: RevisionDetail; editable: 
 `editable === (revision.lifecycle === 'IN_WORK')`. `onChanged` tells the parent to refetch the
 revision (counts may change); tabs still manage/refetch their own data internally.
 
-## ECN — Engineering Change Notice (iteration 2)
+## ECN — Engineering Change Notice
 
 Change management for parts/products: an ECN collects the parts being changed
 ("affected items"), tracks who changed what and why, carries the manufacturing
@@ -230,7 +231,7 @@ PartDetail: when `revision.ecn` is set and its status is active, show an Alert
 "Managed by <ecnNumber> (<status>)" linking to `/ecns/:id` and HIDE the
 submit/approve/reject/obsolete action buttons for that revision.
 
-### ECN reviewers & approval workflow (iteration 3)
+### ECN reviewers & approval workflow
 
 - **E11 Reviewers** — any user can be assigned as a reviewer while the ECN is DRAFT or
   IN_REVIEW (409 otherwise; duplicate reviewer 409 `"User is already a reviewer"`).
@@ -278,7 +279,7 @@ pickers (part search + revision select per side), summary tiles, indented tree t
 with status tags and side-by-side qty/rev columns. EcnDetail item rows link to
 `/compare?left=<fromRevId>&right=<toRevId>` when both exist.
 
-## Tier 1+2 (iteration 4) — documents, RBAC, audit, ECR, AML, effectivity, alternates, baselines, attributes, cost
+## Documents, RBAC, audit, ECR, AML, effectivity, alternates, baselines, attributes, cost
 
 Foundations already in place (do not re-implement): `middleware/rbac.ts`
 (requireWriteRole app-wide: VIEWER read-only 403; `requireAdmin(req)` helper),
@@ -397,7 +398,7 @@ section) — server remains the authority. Meta helpers exist in components/meta
 DOC_CATEGORY_META/OPTIONS, ECR_STATUS_META/OPTIONS + EcrStatusTag, AML_STATUS_META/
 OPTIONS + AmlStatusTag, ATTRIBUTE_TYPE_OPTIONS, ROLE_OPTIONS, formatBytes, formatMoney.
 
-## Enterprise layer (iteration 6)
+## Enterprise layer — inbox, search, notifications, exports
 
 ### Notifications (`src/routes/notifications.ts`, helper `src/lib/notify.ts`)
 
@@ -450,9 +451,9 @@ Quantity,UoM,RefDes,Notes,Effective From,Effective To. Proper CSV quoting (RFC 4
   but OUTSIDE AppLayout. EcnDetail gets a "Print notice" button linking there.
 - BomTab toolbar gets an "Export CSV" button (href = api.bomExportUrl(revision.id)).
 
-## Iteration 7 — email, requirements, workflow engine
+## Email, requirements and the workflow engine
 
-### Email (done inline — lib/mailer.ts outbox dispatcher, routes/email.ts; do not modify)
+### Email (`lib/mailer.ts` outbox dispatcher, `routes/email.ts`)
 
 ### Requirements & traceability (`src/routes/requirements.ts`)
 
@@ -534,9 +535,9 @@ instance exists for the ECN. **W8** search gains a requirements group
 - MyWork: "Workflow tasks waiting on you" card (from pendingTasks) above reviews.
 - AppLayout SEARCH_GROUPS gains Requirements group.
 
-## Deployable tier (iteration 8)
+## Integration — API keys, webhooks, ERP exchange, variants, analytics
 
-Foundations already written (Read, do not modify): `src/middleware/apikey.ts`
+Foundations: `src/middleware/apikey.ts`
 (apiKeyAuth, generateApiKey, hashApiKey), `src/lib/webhooks.ts` (WEBHOOK_EVENTS,
 emitEvent, signPayload, dispatchPendingWebhooks). Routers `integration.ts`, `erp.ts`,
 `variants.ts`, `analytics.ts` are already imported+mounted at /api in index.ts.
@@ -616,7 +617,7 @@ created = ECNs created that month, released = ECNs released that month, oldest f
 topCostDrivers: 5 parts with the highest rolled-up cost — reuse the roll-up logic in
 `src/routes/cost.ts` (import or replicate; depth-capped, cycle-safe).
 
-### Frontend (iteration 8)
+### Frontend — integration, ERP, variants, analytics
 - `pages/IntegrationAdmin.tsx` at /admin/integration (admin): API keys table (name,
   prefix, scope, last used, created, Revoke) + create modal that shows the full key ONCE
   in a copyable Alert with a "copy" button and a warning it won't be shown again;
@@ -649,7 +650,7 @@ topCostDrivers: 5 parts with the highest rolled-up cost — reuse the roll-up lo
   "Integration" (/admin/integration); extend the selectedKey prefix list. App.tsx:
   register all four routes (Integration wrapped in RequireAdmin like other /admin pages).
 
-## Final tier (iteration 9)
+## Quality, projects, RFQ and CAD conversion
 
 New routers to create and mount at /api in index.ts: `quality.ts`, `projects.ts`, `rfq.ts`.
 Schema models: Nonconformance, CorrectiveAction, Project, ProjectPhase, ProjectDeliverable,
@@ -717,7 +718,7 @@ Numbering: scan-max + retry on P2002, exactly like generatePartNumber —
 - `RfqQuoteDetail.extendedPrice` = unitPrice × line quantity; `isLowest` = true for the
   minimum unitPrice on that line (ties: all tied quotes true). Quotes ordered price asc.
 
-### Frontend (iteration 9)
+### Frontend — quality, projects, RFQ, CAD
 - `pages/Quality.tsx` at /quality — Tabs "Nonconformances" / "Corrective actions", each a
   filterable paginated table + create modal; rows link to detail pages.
 - `pages/NcrDetail.tsx` at /ncrs/:id — header (number/title/severity/status tags), details
