@@ -7,8 +7,17 @@
 import { chromium } from 'playwright';
 
 const BASE = process.env.TOUR_BASE || 'https://demo.turboplm.com';
-const EMAIL = 'demo@turboplm.com';
-const PASSWORD = 'PublicDemo2026!';
+// Credentials come from the environment — never commit them:
+//   TOUR_EMAIL=you@example.com TOUR_PASSWORD='…' node tour.mjs
+const EMAIL = process.env.TOUR_EMAIL;
+const PASSWORD = process.env.TOUR_PASSWORD;
+
+if (!EMAIL || !PASSWORD) {
+  console.error(
+    'Set TOUR_EMAIL and TOUR_PASSWORD to an account on the target instance before recording.'
+  );
+  process.exit(1);
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
