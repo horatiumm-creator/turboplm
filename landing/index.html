@@ -97,6 +97,10 @@
   .ind2{padding-left:40px !important}
   @media(max-width:700px){.mock-body{grid-template-columns:1fr}.mock-side{display:none}.mock-main{padding:14px}table.bom .hide-s{display:none}}
 
+  /* video */
+  .video-wrap{margin-top:32px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#000;box-shadow:0 18px 44px rgba(9,20,38,.14)}
+  .video-wrap video{display:block;width:100%;height:auto;aspect-ratio:16/10}
+
   /* grids */
   .grid{display:grid;gap:18px;margin-top:34px}
   .g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
@@ -133,6 +137,7 @@
   <div class="wrap nav">
     <a class="brand" href="#top"><span class="mark">T</span> TurboPLM</a>
     <nav class="nav-links">
+      <a href="#tour">Watch the tour</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#change">Change control</a>
       <a href="#demo">Live demo</a>
@@ -207,6 +212,25 @@
           </table>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <div class="eyebrow">Product tour</div>
+    <h2>See it in action</h2>
+    <p class="lede">
+      Under two minutes through the real application — the part master, a four-level bill
+      of materials, a structure comparison, a change notice with its dispositions, CAD in
+      the browser, requirements and analytics. No narration; captions carry it.
+    </p>
+    <div class="video-wrap">
+      <video controls preload="metadata" poster="poster.jpg" playsinline>
+        <source src="tour.mp4" type="video/mp4" />
+        Your browser cannot play this video —
+        <a href="tour.mp4">download it instead</a>.
+      </video>
     </div>
   </div>
 </section>
@@ -393,7 +417,7 @@
           Tell me what you build and where your product data hurts. No obligation.
         </p>
       </div>
-      <a class="btn btn-primary" href="mailto:hello@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+      <a class="btn btn-primary" href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
     </div>
   </div>
 </section>
@@ -410,8 +434,10 @@
       </div>
       <div>
         <h4>Product</h4>
-        <a href="#capabilities">Capabilities</a>
+        <a href="#tour">Watch the tour</a>
+      <a href="#capabilities">Capabilities</a>
         <a href="#change">Change control</a>
+        <a href="#tour">Product tour</a>
         <a href="#demo">Live demo</a>
         <a href="#selfhosted">Self-hosted</a>
       </div>
