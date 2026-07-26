@@ -348,21 +348,28 @@
     <p class="lede">
       A running instance, seeded with a four-level quadcopter product — two variants that
       share subassemblies, released and in-work revisions, process plans, documents and
-      changes in flight. Sign in read-only and click around.
+      changes in flight. Create an account and click around.
     </p>
     <div class="demo-box">
       <div>
-        <h3 style="margin-bottom:6px">Read-only guest access</h3>
-        <p style="color:var(--muted);font-size:.93rem;margin:0 0 16px">
-          The guest account can view everything and change nothing, so explore freely.
+        <h3 style="margin-bottom:6px">Create your own account</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0 0 16px;max-width:52ch">
+          Sign up with an email and password, or continue with Google. Accounts are
+          read-only, so you can explore the whole system without changing the shared
+          demo data.
         </p>
-        <a class="btn btn-primary" href="https://demo.turboplm.com">Open the live demo</a>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a class="btn btn-primary" href="https://demo.turboplm.com/register">Sign up free</a>
+          <a class="btn btn-ghost" href="https://demo.turboplm.com/login">Sign in</a>
+        </div>
       </div>
-      <div class="creds">
-        <div><strong>demo@turboplm.com</strong></div>
-        <div>PublicDemo2026!</div>
-      </div>
+      <ul class="check" style="margin:0">
+        <li>No approval step — you are in immediately</li>
+        <li>Explore every module with real product data</li>
+        <li>Nothing to install</li>
+      </ul>
     </div>
+
     <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
       Prefer your own copy? <code>git clone</code>, <code>docker compose up -d --build</code>,
       and you have the same thing on your laptop in a couple of minutes — demo data included.

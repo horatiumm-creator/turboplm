@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { User } from '@prisma/client';
+import { Role, User } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { HttpError, asyncHandler } from '../lib/errors';
 import { clearAuthCookie, requireAuth, setAuthCookie } from '../middleware/auth';
@@ -26,6 +26,14 @@ function toUserInfo(u: User) {
  */
 const ALLOW_REGISTRATION = process.env.ALLOW_REGISTRATION !== 'false';
 
+/**
+ * Role granted to anyone who signs themselves up (local or Google). Defaults to
+ * VIEWER so a public instance cannot be edited by strangers; set
+ * REGISTRATION_ROLE=ENGINEER for an open sandbox where visitors may change data.
+ */
+const REGISTRATION_ROLE: Role =
+  process.env.REGISTRATION_ROLE === 'ENGINEER' ? Role.ENGINEER : Role.VIEWER;
+
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
@@ -48,6 +56,7 @@ router.post(
         name: name.trim(),
         passwordHash: await bcrypt.hash(password, 10),
         provider: 'LOCAL',
+        role: REGISTRATION_ROLE,
       },
     });
     setAuthCookie(res, user.id);
@@ -166,6 +175,7 @@ router.get(
               provider: 'GOOGLE',
               googleId: info.sub,
               avatarUrl: info.picture ?? null,
+              role: REGISTRATION_ROLE,
             },
           });
     }

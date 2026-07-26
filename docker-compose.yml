@@ -39,6 +39,8 @@ services:
       # Public deployments: no self-registration, no demo data/logins.
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      # Role for self-signups: VIEWER keeps a public instance read-only.
+      REGISTRATION_ROLE: ${REGISTRATION_ROLE:-VIEWER}
     ports:
       - "8010:4000"
     volumes:
