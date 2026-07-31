@@ -129,6 +129,36 @@ model User {
   phasesPassed     ProjectPhase[]         @relation("PhasePassedBy")
   deliverables     ProjectDeliverable[]   @relation("DeliverableOwner")
   rfqs             Rfq[]
+  signatures       ElectronicSignature[]
+  signatureRules   SignatureRequirement[]
+  rfqInvitations   RfqInvitation[]
+  buildUnits       BuildUnit[]
+  asBuiltLines     AsBuiltLine[]
+  ssoIdentities    SsoIdentity[]
+  catalogImports   CatalogImport[]
+  catalogMappings  CatalogMapping[]
+  createdMaterials Material[]
+  lockedDocuments  Document[]            @relation("DocumentLockedBy")
+  markupsCreated   Markup[]              @relation("MarkupCreatedBy")
+  markupsResolved  Markup[]              @relation("MarkupResolvedBy")
+  markupComments   MarkupComment[]
+  serviceRecords   ServiceRecord[]       @relation("ServiceCreatedBy")
+  serviceAssigned  ServiceRecord[]       @relation("ServiceTechnician")
+  servicePartSwaps ServicePartSwap[]
+  accessGroups     AccessGroup[]         @relation("AccessGroupCreatedBy")
+  groupMemberships AccessGroupMember[]
+  partAclsGranted      PartAcl[]        @relation("PartAclGrantedBy")
+  partAclsFor          PartAcl[]        @relation("PartAclUser")
+  documentAclsGranted  DocumentAcl[]    @relation("DocumentAclGrantedBy")
+  documentAclsFor      DocumentAcl[]    @relation("DocumentAclUser")
+  ecnAclsGranted       EcnAcl[]         @relation("EcnAclGrantedBy")
+  ecnAclsFor           EcnAcl[]         @relation("EcnAclUser")
+  projectAclsGranted   ProjectAcl[]     @relation("ProjectAclGrantedBy")
+  projectAclsFor       ProjectAcl[]     @relation("ProjectAclUser")
+  buildUnitAclsGranted BuildUnitAcl[]   @relation("BuildUnitAclGrantedBy")
+  buildUnitAclsFor     BuildUnitAcl[]   @relation("BuildUnitAclUser")
+  projectMemberships ProjectMember[] @relation("ProjectMemberUser")
+  projectMembersAdded ProjectMember[] @relation("ProjectMemberAddedBy")
 }
 
 model Part {
@@ -158,6 +188,10 @@ model Part {
   nonconformances    Nonconformance[]
   deliverables       ProjectDeliverable[]
   rfqLines           RfqLine[]
+  buildUnits         BuildUnit[]
+  catalogImportRows  CatalogImportRow[]
+  materials          PartMaterial[]
+  acls               PartAcl[]
 }
 
 model PartRevision {
@@ -178,6 +212,7 @@ model PartRevision {
   documentLinks   DocumentLink[]
   baselines       Baseline[]
   nonconformances Nonconformance[]
+  buildUnits      BuildUnit[]
 
   @@unique([partId, revision])
   @@index([partId])
@@ -192,6 +227,9 @@ model Ecn {
   priority        EcnPriority          @default(MEDIUM)
   status          EcnStatus            @default(DRAFT)
   effectivityDate DateTime?
+  /// Unit effectivity: "effective from S/N 0042". Free text, not a foreign key — a cut-in
+  /// serial is routinely recorded before that unit exists.
+  effectiveFromSerial String?
   createdById     Int
   createdBy       User                 @relation("EcnCreatedBy", fields: [createdById], references: [id])
   approvedById    Int?
@@ -207,6 +245,8 @@ model Ecn {
   workflow        EcnWorkflow?
   nonconformances Nonconformance[]
   deliverables    ProjectDeliverable[]
+  serviceRecords  ServiceRecord[]
+  acls            EcnAcl[]
 }
 
 model Document {
@@ -223,6 +263,14 @@ model Document {
   links            DocumentLink[]
   requirementLinks RequirementLink[]
   deliverables     ProjectDeliverable[]
+  /// Vault lock (rule D1). Held on the document, not a version: you reserve the right to
+  /// produce the next one.
+  lockedById       Int?
+  lockedBy         User?                @relation("DocumentLockedBy", fields: [lockedById], references: [id])
+  lockedAt         DateTime?
+  lockExpiresAt    DateTime?
+  lockNote         String?
+  acls             DocumentAcl[]
 }
 
 enum ConversionStatus {
@@ -250,9 +298,51 @@ model DocumentVersion {
   glbPath          String?
   triangleCount    Int?
   boundingBox      Json?
+  cadStructure     CadStructure?
+  markups          Markup[]
 
   @@unique([documentId, version])
   @@index([conversionStatus])
+}
+
+/// The cBOM: the product structure read out of one CAD version. A DocumentVersion is
+/// immutable, so this snapshot is versioned with the file and cannot drift from it.
+model CadStructure {
+  id                Int              @id @default(autoincrement())
+  documentVersionId Int              @unique
+  documentVersion   DocumentVersion  @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+  status            ConversionStatus @default(PENDING)
+  /// Failure text when status is FAILED, or why it was skipped.
+  error             String?
+  rootName          String?
+  nodeCount         Int              @default(0)
+  maxDepth          Int              @default(0)
+  extractedAt       DateTime         @default(now())
+  nodes             CadNode[]
+
+  @@index([status])
+}
+
+/// One product occurrence in a cBOM. Part matches are deliberately NOT stored — they are
+/// resolved on read so a part created after the CAD upload starts matching immediately.
+model CadNode {
+  id          Int          @id @default(autoincrement())
+  structureId Int
+  structure   CadStructure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  parentId    Int?
+  parent      CadNode?     @relation("CadNodeTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    CadNode[]    @relation("CadNodeTree")
+  name        String
+  /// Placement count for this product under its parent — the BOM quantity.
+  instances   Float        @default(1)
+  /// 0 for the root, so a level can be selected without walking the tree.
+  depth       Int          @default(0)
+  /// Sibling order, for stable rendering and stable diff paths.
+  seq         Int          @default(0)
+
+  @@index([structureId, depth])
+  @@index([parentId])
+  @@index([name])
 }
 
 model DocumentLink {
@@ -292,6 +382,7 @@ model Ecr {
   resolvedAt   DateTime?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  markups      Markup[]
 }
 
 model Manufacturer {
@@ -311,7 +402,11 @@ model ManufacturerPart {
   mpn            String
   status         AmlStatus    @default(APPROVED)
   description    String?
+  /// The distributor offer this row was imported from, when it came from a catalog.
+  distributorName       String?
+  distributorPartNumber String?
   createdAt      DateTime     @default(now())
+  importRows     CatalogImportRow[]
 
   @@unique([partId, manufacturerId, mpn])
   @@index([partId])
@@ -623,6 +718,10 @@ model Nonconformance {
   disposition      EcnDisposition?
   quantityAffected Float?
   lotOrSerial      String?
+  /// Set when the nonconformance is against a tracked unit; `lotOrSerial` stays for
+  /// historical records that predate one.
+  buildUnitId      Int?
+  buildUnit        BuildUnit?     @relation(fields: [buildUnitId], references: [id])
   partId           Int?
   part             Part?             @relation(fields: [partId], references: [id])
   partRevisionId   Int?
@@ -638,6 +737,7 @@ model Nonconformance {
   closedAt         DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+  serviceRecords   ServiceRecord[]
 
   @@index([partId])
   @@index([capaId])
@@ -701,6 +801,11 @@ model Project {
   targetDate  DateTime?
   ownerId     Int
   owner       User           @relation("ProjectOwner", fields: [ownerId], references: [id])
+  /// When true, only members and global ADMINs may see this project (rule A6). Scope is the
+  /// project object itself — it does NOT hide the parts it references (rule A7).
+  restricted  Boolean        @default(false)
+  members     ProjectMember[]
+  acls        ProjectAcl[]
   createdById Int
   createdBy   User           @relation("ProjectCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime       @default(now())
@@ -771,6 +876,46 @@ model Supplier {
   createdAt    DateTime   @default(now())
   quotes       RfqQuote[]
   awards       RfqLine[]  @relation("AwardedSupplier")
+  users        SupplierUser[]
+  invitations  RfqInvitation[]
+}
+
+/// An external person who signs in to the supplier portal. Deliberately NOT a `User`:
+/// these accounts must never be able to reach the internal API, and keeping them in a
+/// separate table makes that structural rather than a matter of checking a flag.
+model SupplierUser {
+  id              Int       @id @default(autoincrement())
+  supplierId      Int
+  supplier        Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  email           String    @unique
+  name            String
+  /// Null until the invitation is accepted; an account without one cannot sign in.
+  passwordHash    String?
+  /// Single-use invitation, cleared on acceptance.
+  inviteToken     String?   @unique
+  inviteExpiresAt DateTime?
+  active          Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([supplierId])
+}
+
+/// Which suppliers were asked to quote an RFQ. Invitations may be prepared while the RFQ
+/// is still a draft, so visibility is gated on RFQ status, not on the invitation existing.
+model RfqInvitation {
+  id          Int       @id @default(autoincrement())
+  rfqId       Int
+  rfq         Rfq       @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplierId  Int
+  supplier    Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  invitedById Int
+  invitedBy   User      @relation(fields: [invitedById], references: [id])
+  invitedAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  @@unique([rfqId, supplierId])
+  @@index([supplierId])
 }
 
 model Rfq {
@@ -785,6 +930,7 @@ model Rfq {
   createdById Int
   createdBy   User      @relation(fields: [createdById], references: [id])
   createdAt   DateTime  @default(now())
+  invitations RfqInvitation[]
   updatedAt   DateTime  @updatedAt
   lines       RfqLine[]
 }
@@ -910,6 +1056,7 @@ model BomLine {
   effectiveTo      DateTime?
   alternates       BomLineAlternate[]
   optionConditions BomLineOption[]
+  asBuiltLines     AsBuiltLine[]
 
   @@unique([parentRevisionId, findNumber])
   @@unique([parentRevisionId, childPartId])
@@ -962,6 +1109,703 @@ model OperationMaterial {
   quantity    Float     @default(1)
   uom         String    @default("ea")
   notes       String?
+  /// Expected process loss, e.g. 0.02 for 2 %. Consumed qty = quantity * (1 + scrapFactor).
+  scrapFactor Float     @default(0)
+  /// Adhesive, solder, thread-lock: legitimately absent from the eBOM, so mBOM-only is
+  /// not a defect for these.
+  consumable  Boolean   @default(false)
 
   @@index([partId])
+}
+
+// ---------------------------------------------------------------------------
+// Electronic signatures (21 CFR Part 11 / ISO 13485 shape) — rules S1–S4
+// ---------------------------------------------------------------------------
+
+enum SignedEntityType {
+  ECN
+  REVISION
+  DOCUMENT
+}
+
+enum SignatureMeaning {
+  AUTHORED
+  REVIEWED
+  APPROVED
+  QA_APPROVED
+}
+
+enum SignatureStatus {
+  VALID
+  /// The signed content changed after signing, so the signature no longer applies.
+  VOIDED
+}
+
+enum SignatureAuthMethod {
+  PASSWORD
+  /// Google-only accounts have no password; they retype their own address instead.
+  EMAIL_CONFIRM
+}
+
+/// Which signatures an entity type needs before it can be released. Opt-in: with no
+/// active rows for a type, nothing is gated.
+model SignatureRequirement {
+  id         Int               @id @default(autoincrement())
+  entityType SignedEntityType
+  meaning    SignatureMeaning
+  seq        Int               @default(1)
+  /// Exactly one of role / userId is set: any holder of the role, or a named signer.
+  role       Role?
+  userId     Int?
+  user       User?             @relation(fields: [userId], references: [id])
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+
+  @@unique([entityType, meaning, seq])
+  @@index([entityType, active])
+}
+
+/// Append-only. Never updated except to void, never deleted.
+model ElectronicSignature {
+  id          Int                 @id @default(autoincrement())
+  entityType  SignedEntityType
+  entityId    Int
+  meaning     SignatureMeaning
+  userId      Int
+  user        User                @relation(fields: [userId], references: [id])
+  /// Printed name and role captured at signing time: Part 11 §11.50 requires the record
+  /// to stand alone, and a user row can be renamed or re-roled later.
+  signedName  String
+  signedRole  String
+  signedAt    DateTime            @default(now())
+  authMethod  SignatureAuthMethod
+  /// SHA-256 of the canonical projection of what was signed (lib/signing.ts).
+  contentHash String
+  status      SignatureStatus     @default(VALID)
+  voidedAt    DateTime?
+  voidedReason String?
+  comment     String?
+
+  @@index([entityType, entityId, status])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Serial / lot tracking and as-built records — rules U1-U7
+// ---------------------------------------------------------------------------
+
+enum BuildKind {
+  /// One physical object with a unique serial number; quantity is always 1.
+  SERIAL
+  /// A batch produced together under one code; may be split across many parents.
+  LOT
+}
+
+enum BuildStatus {
+  IN_PROGRESS
+  COMPLETED
+  SCRAPPED
+  SHIPPED
+}
+
+/// A physical thing that was actually built. Serials and lots share one model so that a
+/// genealogy trace is a walk over a single node type rather than two interleaved ones.
+model BuildUnit {
+  id             Int              @id @default(autoincrement())
+  kind           BuildKind
+  identifier     String           @unique
+  partId         Int
+  part           Part             @relation(fields: [partId], references: [id])
+  /// The revision this was built to — the baseline the as-built record is compared against.
+  partRevisionId Int
+  partRevision   PartRevision     @relation(fields: [partRevisionId], references: [id])
+  quantity       Float            @default(1)
+  status         BuildStatus      @default(IN_PROGRESS)
+  builtAt        DateTime?
+  shippedAt      DateTime?
+  notes          String?
+  createdById    Int
+  createdBy      User             @relation(fields: [createdById], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  /// Lines where this unit is the thing being built.
+  serviceRecords ServiceRecord[]
+  acls           BuildUnitAcl[]
+  swapsRemoved   ServicePartSwap[] @relation("SwapRemoved")
+  swapsInstalled ServicePartSwap[] @relation("SwapInstalled")
+  consumes       AsBuiltLine[]    @relation("AsBuiltParent")
+  /// Lines where this unit is the thing consumed.
+  consumedBy     AsBuiltLine[]    @relation("AsBuiltChild")
+  nonconformances Nonconformance[]
+
+  @@index([partId])
+  @@index([status])
+  @@index([kind, status])
+}
+
+/// One consumption event: `quantity` of `child` went into `parent`.
+model AsBuiltLine {
+  id           Int       @id @default(autoincrement())
+  parentId     Int
+  parent       BuildUnit @relation("AsBuiltParent", fields: [parentId], references: [id], onDelete: Cascade)
+  childId      Int
+  child        BuildUnit @relation("AsBuiltChild", fields: [childId], references: [id], onDelete: Restrict)
+  quantity     Float     @default(1)
+  /// The eBOM line this satisfies; null records an unplanned consumption.
+  bomLineId    Int?
+  bomLine      BomLine?  @relation(fields: [bomLineId], references: [id], onDelete: SetNull)
+  /// Computed at record time: the child's part differs from the referenced BOM line's part.
+  substitution Boolean   @default(false)
+  recordedById Int
+  recordedBy   User      @relation(fields: [recordedById], references: [id])
+  recordedAt   DateTime  @default(now())
+
+  @@unique([parentId, childId])
+  @@index([childId])
+  @@index([bomLineId])
+}
+
+// ---------------------------------------------------------------------------
+// Enterprise access — SSO and project permissions (rules A1-A7)
+// ---------------------------------------------------------------------------
+
+enum SsoProtocol {
+  OIDC
+  /// Present so the shape is ready; deliberately NOT implemented (rule A5). Correct SAML
+  /// needs XML canonicalisation and signature verification, where a subtle bug is a silent
+  /// authentication bypass — it warrants a vetted library and its own piece of work.
+  SAML
+}
+
+model IdentityProvider {
+  id                  Int           @id @default(autoincrement())
+  slug                String        @unique
+  displayName         String
+  protocol            SsoProtocol   @default(OIDC)
+  issuer              String
+  clientId            String
+  /// AES-256-GCM ciphertext. Write-only: no read endpoint returns it, masked or otherwise.
+  clientSecretEnc     String
+  discoveryUrl        String
+  enabled             Boolean       @default(false)
+  autoProvision       Boolean       @default(true)
+  /// When non-empty, enforced on provisioning AND on linking to an existing account.
+  allowedEmailDomains String[]      @default([])
+  defaultRole         Role          @default(VIEWER)
+  groupClaim          String        @default("groups")
+  /// { "<group value>": "ADMIN" | "ENGINEER" | "VIEWER" }, first match wins.
+  groupRoleMap        Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  identities          SsoIdentity[]
+}
+
+/// Links a provider's stable subject to a local user. The subject, never the email, is the
+/// durable key: corporate addresses get renamed.
+model SsoIdentity {
+  id          Int              @id @default(autoincrement())
+  providerId  Int
+  provider    IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  subject     String
+  userId      Int
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastLoginAt DateTime?
+  createdAt   DateTime         @default(now())
+
+  @@unique([providerId, subject])
+  @@index([userId])
+}
+
+enum ProjectRole {
+  LEAD
+  CONTRIBUTOR
+  OBSERVER
+}
+
+/// Membership of a project. Only meaningful for a restricted project, but recorded for any
+/// project so that restricting one later does not lock everybody out at once.
+model ProjectMember {
+  id          Int         @id @default(autoincrement())
+  projectId   Int
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User        @relation("ProjectMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  projectRole ProjectRole @default(CONTRIBUTOR)
+  addedById   Int
+  addedBy     User        @relation("ProjectMemberAddedBy", fields: [addedById], references: [id])
+  addedAt     DateTime    @default(now())
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Vendor catalog import — rules V1-V5
+// ---------------------------------------------------------------------------
+
+enum CatalogFormat {
+  CSV
+  XLSX
+  /// The BME standard XML catalog, usually carrying ETIM classification.
+  BMECAT_XML
+}
+
+enum CatalogImportStatus {
+  DRAFT
+  VALIDATED
+  /// Claimed by a commit in flight. A conditional VALIDATED -> COMMITTING update is what
+  /// stops two commits writing the same rows, and stops a validate racing a commit.
+  COMMITTING
+  COMMITTED
+  FAILED
+  CANCELLED
+}
+
+enum CatalogRowStatus {
+  NEW
+  UPDATE
+  /// The same (manufacturer, mpn) appeared earlier in the same file.
+  DUPLICATE
+  INVALID
+  SKIPPED
+  COMMITTED
+}
+
+/// A reusable target-field -> source-column mapping. Vendor column names agree on nothing,
+/// so the mapping is the reusable asset, not the parser.
+model CatalogMapping {
+  id          Int             @id @default(autoincrement())
+  name        String          @unique
+  vendor      String?
+  format      CatalogFormat   @default(CSV)
+  /// { targetField: sourceColumn }
+  fieldMap    Json
+  /// Values the file does not carry, e.g. { category: "PURCHASED" }.
+  defaults    Json?
+  /// Column names whose presence identifies this vendor's export.
+  headerSignature String[]    @default([])
+  /// Seeded presets are read-only.
+  builtIn     Boolean         @default(false)
+  createdById Int?
+  createdBy   User?           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  imports     CatalogImport[]
+}
+
+model CatalogImport {
+  id              Int                 @id @default(autoincrement())
+  fileName        String
+  format          CatalogFormat
+  status          CatalogImportStatus @default(DRAFT)
+  mappingId       Int?
+  mapping         CatalogMapping?     @relation(fields: [mappingId], references: [id], onDelete: SetNull)
+  /// The mapping actually applied at validation, whether it came from a saved mapping or was
+  /// built by hand in the UI. Without this a one-off mapping is unrecoverable, so "save this
+  /// mapping for next time" — the only reason `fromImportId` exists — could not work.
+  appliedFieldMap Json?
+  appliedDefaults Json?
+  /// Vendor guessed from the header signature; null when nothing matched.
+  detectedVendor  String?
+  /// Source column names, in file order — what the mapping UI offers.
+  sourceColumns   String[]            @default([])
+  rowCount        Int                 @default(0)
+  newCount        Int                 @default(0)
+  updateCount     Int                 @default(0)
+  duplicateCount  Int                 @default(0)
+  invalidCount    Int                 @default(0)
+  skippedCount    Int                 @default(0)
+  committedCount  Int                 @default(0)
+  /// Rows that were eligible but failed during commit; a partial commit is reported, not hidden.
+  failedCount     Int                 @default(0)
+  error           String?
+  createdById     Int
+  createdBy       User                @relation(fields: [createdById], references: [id])
+  createdAt       DateTime            @default(now())
+  validatedAt     DateTime?
+  committedAt     DateTime?
+  rows            CatalogImportRow[]
+
+  @@index([status])
+}
+
+model CatalogImportRow {
+  id                 Int               @id @default(autoincrement())
+  importId           Int
+  import             CatalogImport     @relation(fields: [importId], references: [id], onDelete: Cascade)
+  /// 1-based line in the source file, so a message can point the user at it.
+  lineNumber         Int
+  /// The source row verbatim, so a different mapping can be applied without re-uploading.
+  raw                Json
+  /// The mapped candidate after validation; null until the import is validated.
+  mapped             Json?
+  status             CatalogRowStatus  @default(NEW)
+  message            String?
+  /// Set on commit — the import doubles as an audit trail of what it created.
+  partId             Int?
+  part               Part?             @relation(fields: [partId], references: [id], onDelete: SetNull)
+  manufacturerPartId Int?
+  manufacturerPart   ManufacturerPart? @relation(fields: [manufacturerPartId], references: [id], onDelete: SetNull)
+
+  @@unique([importId, lineNumber])
+  @@index([importId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Materials — what a part is made FROM (rules N2, N3)
+// ---------------------------------------------------------------------------
+
+enum MaterialClass {
+  METAL
+  POLYMER
+  COMPOSITE
+  CERAMIC
+  ELASTOMER
+  OTHER
+}
+
+/// The stock form the material is bought in; it changes how a buyer orders the same alloy.
+enum MaterialForm {
+  SHEET
+  PLATE
+  BAR
+  ROD
+  TUBE
+  PROFILE
+  CASTING
+  FORGING
+  POWDER
+  LIQUID
+  OTHER
+}
+
+model Material {
+  id            Int            @id @default(autoincrement())
+  code          String         @unique
+  name          String
+  materialClass MaterialClass  @default(METAL)
+  /// The controlling specification: "AL 6061-T6", "ASTM A36", "PA66-GF30".
+  specification String?
+  /// g/cm³, so a modelled volume can be turned into a purchasable mass.
+  density       Float?
+  /// The unit the material is bought and planned in.
+  stockUom      String         @default("kg")
+  unitCost      Float?
+  notes         String?
+  active        Boolean        @default(true)
+  createdById   Int
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  partMaterials PartMaterial[]
+
+  @@index([materialClass])
+}
+
+/// What raw material a part is made from — deliberately NOT a BomLine (which composes parts)
+/// and NOT an OperationMaterial (which consumes parts at an operation). This is the stock a
+/// machinist or moulder starts with, and it is what the material-requirements roll-up sums.
+model PartMaterial {
+  id          Int          @id @default(autoincrement())
+  partId      Int
+  part        Part         @relation(fields: [partId], references: [id], onDelete: Cascade)
+  materialId  Int
+  material    Material     @relation(fields: [materialId], references: [id])
+  form        MaterialForm @default(BAR)
+  /// What ends up in the finished part, in the material's stockUom.
+  netQuantity Float
+  /// Fraction lost to machining, trim or sprue: gross = net * (1 + scrapFactor).
+  scrapFactor Float        @default(0)
+  /// Free text the buyer orders against, e.g. "40 x 40 x 220 mm bar".
+  stockSize   String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  /// The same alloy in two forms is two legitimate rows; the same alloy and form is not.
+  @@unique([partId, materialId, form])
+  @@index([materialId])
+}
+
+// ---------------------------------------------------------------------------
+// Design review markup (rules K1-K4)
+// ---------------------------------------------------------------------------
+
+enum MarkupKind {
+  /// A point in 3D space, stored with the camera so "look at what I saw" works.
+  PIN_3D
+  BOX_2D
+  POINT_2D
+  /// A version-level remark with no position.
+  NOTE
+}
+
+enum MarkupStatus {
+  OPEN
+  RESOLVED
+  WONT_FIX
+}
+
+/// Anchored to a DocumentVersion, never a Document: a comment about geometry is about *that*
+/// geometry and must not silently follow a new upload.
+model Markup {
+  id                Int             @id @default(autoincrement())
+  documentVersionId Int
+  documentVersion   DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+  kind              MarkupKind
+  /// Shape depends on `kind` and is fixed by rule K1. 2D coordinates are normalized 0-1 so a
+  /// markup survives zoom, screen size and re-render.
+  geometry          Json
+  status            MarkupStatus    @default(OPEN)
+  createdById       Int
+  createdBy         User            @relation("MarkupCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime        @default(now())
+  resolvedById      Int?
+  resolvedBy        User?           @relation("MarkupResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt        DateTime?
+  /// Set once the markup has been escalated into a change request.
+  ecrId             Int?
+  ecr               Ecr?            @relation(fields: [ecrId], references: [id], onDelete: SetNull)
+  comments          MarkupComment[]
+
+  @@index([documentVersionId, status])
+  @@index([createdById])
+}
+
+model MarkupComment {
+  id          Int      @id @default(autoincrement())
+  markupId    Int
+  markup      Markup   @relation(fields: [markupId], references: [id], onDelete: Cascade)
+  body        String
+  createdById Int
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([markupId])
+}
+
+// ---------------------------------------------------------------------------
+// Service and as-maintained records (rules G1-G4)
+// ---------------------------------------------------------------------------
+
+enum ServiceKind {
+  REPAIR
+  UPGRADE
+  INSPECTION
+  WARRANTY_CLAIM
+  DECOMMISSION
+}
+
+enum ServiceStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  CANCELLED
+}
+
+model ServiceRecord {
+  id            Int                @id @default(autoincrement())
+  serviceNumber String             @unique
+  buildUnitId   Int
+  buildUnit     BuildUnit          @relation(fields: [buildUnitId], references: [id])
+  kind          ServiceKind        @default(REPAIR)
+  status        ServiceStatus      @default(OPEN)
+  title         String
+  description   String?
+  reportedAt    DateTime           @default(now())
+  closedAt      DateTime?
+  technicianId  Int?
+  technician    User?              @relation("ServiceTechnician", fields: [technicianId], references: [id])
+  createdById   Int
+  createdBy     User               @relation("ServiceCreatedBy", fields: [createdById], references: [id])
+  /// A field failure is often a nonconformance; an upgrade usually implements a change.
+  ncrId         Int?
+  ncr           Nonconformance?    @relation(fields: [ncrId], references: [id], onDelete: SetNull)
+  ecnId         Int?
+  ecn           Ecn?               @relation(fields: [ecnId], references: [id], onDelete: SetNull)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  swaps         ServicePartSwap[]
+
+  @@index([buildUnitId])
+  @@index([status])
+}
+
+/// The as-maintained delta. Committing one rewrites the as-built graph under the same advisory
+/// lock rule U3 uses, so genealogy and service history can never disagree.
+model ServicePartSwap {
+  id              Int           @id @default(autoincrement())
+  serviceRecordId Int
+  serviceRecord   ServiceRecord @relation(fields: [serviceRecordId], references: [id], onDelete: Cascade)
+  removedUnitId   Int?
+  removedUnit     BuildUnit?    @relation("SwapRemoved", fields: [removedUnitId], references: [id])
+  installedUnitId Int?
+  installedUnit   BuildUnit?    @relation("SwapInstalled", fields: [installedUnitId], references: [id])
+  /// Free text, e.g. "left motor" — where on the unit this happened.
+  position        String?
+  reason          String
+  /// Whether the removed unit is written off. EXPLICIT, never inferred from `reason`:
+  /// guessing from prose scrapped working hardware irreversibly ("removed for bench test, no
+  /// fault found" contains "fault"), and SCRAPPED has no way back through the API.
+  scrapRemoved    Boolean       @default(false)
+  performedById   Int
+  performedBy     User          @relation(fields: [performedById], references: [id])
+  performedAt     DateTime      @default(now())
+
+  @@index([serviceRecordId])
+  @@index([removedUnitId])
+  @@index([installedUnitId])
+}
+
+// ---------------------------------------------------------------------------
+// Item-level access control (rules X1-X7)
+// ---------------------------------------------------------------------------
+
+/// Kept for the API surface: one endpoint family addresses all five types, and the routes
+/// translate this to the right table.
+enum AclEntityType {
+  PART
+  DOCUMENT
+  ECN
+  PROJECT
+  BUILD_UNIT
+}
+
+enum AclPermission {
+  READ
+  /// Implies READ; a principal granted WRITE need not also be granted READ.
+  WRITE
+}
+
+model AccessGroup {
+  id          Int                 @id @default(autoincrement())
+  name        String              @unique
+  description String?
+  active      Boolean             @default(true)
+  createdById Int
+  createdBy   User                @relation("AccessGroupCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  members     AccessGroupMember[]
+  partAcls      PartAcl[]
+  documentAcls  DocumentAcl[]
+  ecnAcls       EcnAcl[]
+  projectAcls   ProjectAcl[]
+  buildUnitAcls BuildUnitAcl[]
+}
+
+model AccessGroupMember {
+  id      Int         @id @default(autoincrement())
+  groupId Int
+  group   AccessGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId  Int
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addedAt DateTime    @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+// One ACL table per protected type rather than one polymorphic table. Prisma cannot relate a
+// polymorphic row to five models, and `aclFilter` (rule X2) is expressed as a RELATION filter
+// — "this item has no acls, OR one of them names me" — which an id list cannot replace at any
+// real table size. The five are structurally identical; each is small and tightly indexed.
+//
+// Exactly one of groupId / userId is set, enforced in the route. The two unique constraints
+// work with that: a row granting a group has userId NULL, so it participates only in the
+// (item, groupId) unique, and vice versa. Postgres treats NULLs as distinct, which is what
+// makes the pair behave as intended rather than blocking each other.
+
+model PartAcl {
+  id          Int           @id @default(autoincrement())
+  partId      Int
+  part        Part          @relation(fields: [partId], references: [id], onDelete: Cascade)
+  groupId     Int?
+  group       AccessGroup?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?         @relation("PartAclUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission  AclPermission @default(READ)
+  grantedById Int
+  grantedBy   User          @relation("PartAclGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime      @default(now())
+
+  @@unique([partId, groupId])
+  @@unique([partId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model DocumentAcl {
+  id          Int           @id @default(autoincrement())
+  documentId  Int
+  document    Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  groupId     Int?
+  group       AccessGroup?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?         @relation("DocumentAclUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission  AclPermission @default(READ)
+  grantedById Int
+  grantedBy   User          @relation("DocumentAclGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime      @default(now())
+
+  @@unique([documentId, groupId])
+  @@unique([documentId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model EcnAcl {
+  id          Int           @id @default(autoincrement())
+  ecnId       Int
+  ecn         Ecn           @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  groupId     Int?
+  group       AccessGroup?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?         @relation("EcnAclUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission  AclPermission @default(READ)
+  grantedById Int
+  grantedBy   User          @relation("EcnAclGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime      @default(now())
+
+  @@unique([ecnId, groupId])
+  @@unique([ecnId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model ProjectAcl {
+  id          Int           @id @default(autoincrement())
+  projectId   Int
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  groupId     Int?
+  group       AccessGroup?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?         @relation("ProjectAclUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission  AclPermission @default(READ)
+  grantedById Int
+  grantedBy   User          @relation("ProjectAclGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime      @default(now())
+
+  @@unique([projectId, groupId])
+  @@unique([projectId, userId])
+  @@index([groupId])
+  @@index([userId])
+}
+
+model BuildUnitAcl {
+  id          Int           @id @default(autoincrement())
+  buildUnitId Int
+  buildUnit   BuildUnit     @relation(fields: [buildUnitId], references: [id], onDelete: Cascade)
+  groupId     Int?
+  group       AccessGroup?  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?         @relation("BuildUnitAclUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission  AclPermission @default(READ)
+  grantedById Int
+  grantedBy   User          @relation("BuildUnitAclGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime      @default(now())
+
+  @@unique([buildUnitId, groupId])
+  @@unique([buildUnitId, userId])
+  @@index([groupId])
+  @@index([userId])
 }

@@ -20,6 +20,22 @@ interface LoginValues {
   password: string;
 }
 
+/**
+ * Sign-in failures the server can redirect back with. Each says what the user can do about
+ * it: "failed, try again" is useless advice for a problem a retry cannot fix.
+ */
+const SIGN_IN_ERRORS: Record<string, string> = {
+  google: 'Google sign-in failed, try again.',
+  // Rule A1: the state cookie did not match, so this callback did not come from a flow
+  // started here. Usually a stale tab or a bookmarked callback URL.
+  state:
+    'That sign-in link has expired or was not started here. Start again from this page.',
+  // Rule A1: we will not link or create an account from an address the provider has not
+  // verified, because email is what identifies an existing account.
+  unverified:
+    'Your provider has not verified that email address, so it cannot be used to sign in. Verify it with your provider, or sign in with a password.',
+};
+
 export default function Login() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
@@ -80,11 +96,11 @@ export default function Login() {
           </Typography.Title>
           <Typography.Text type="secondary">Sign in to manage your product data</Typography.Text>
         </div>
-        {searchParams.get('error') === 'google' && (
+        {SIGN_IN_ERRORS[searchParams.get('error') ?? ''] && (
           <Alert
             type="error"
             showIcon
-            message="Google sign-in failed, try again."
+            message={SIGN_IN_ERRORS[searchParams.get('error') ?? '']}
             style={{ marginBottom: 16 }}
           />
         )}

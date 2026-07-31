@@ -13,13 +13,16 @@ import {
   Skeleton,
   Space,
   Spin,
+  Switch,
   Table,
+  Tag,
   Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import * as api from '../../api/client';
+import BomReconciliationCard from './BomReconciliationCard';
 import type {
   OperationDetail,
   OperationMaterialDetail,
@@ -46,6 +49,9 @@ interface MatFormValues {
   quantity: number;
   uom?: string;
   notes?: string;
+  /** Entered as a percentage; stored as a fraction. */
+  scrapPercent?: number;
+  consumable?: boolean;
 }
 
 const fmtMinutes = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -65,6 +71,7 @@ export default function ProcessTab({
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reconKey, setReconKey] = useState(0);
 
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [planForm] = Form.useForm<PlanFormValues>();
@@ -94,6 +101,9 @@ export default function ProcessTab({
     setLoading(true);
     try {
       setPlan(await api.getProcessPlan(revision.id));
+      // Every plan mutation funnels through here, so this is the one place that needs to
+      // tell the comparison it is stale.
+      setReconKey((key) => key + 1);
     } catch (err) {
       showError(err);
     } finally {
@@ -258,7 +268,7 @@ export default function ProcessTab({
 
   const openAddMaterial = (op: OperationDetail) => {
     matForm.resetFields();
-    matForm.setFieldsValue({ quantity: 1 });
+    matForm.setFieldsValue({ quantity: 1, scrapPercent: 0, consumable: false });
     void searchParts('');
     setMatModal({ opId: op.id, material: null });
   };
@@ -270,6 +280,8 @@ export default function ProcessTab({
       quantity: m.quantity,
       uom: m.uom,
       notes: m.notes ?? undefined,
+      scrapPercent: m.scrapFactor * 100,
+      consumable: m.consumable,
     });
     setMatModal({ opId: op.id, material: m });
   };
@@ -289,6 +301,8 @@ export default function ProcessTab({
           quantity: values.quantity,
           uom: values.uom ? values.uom : undefined,
           notes: values.notes ? values.notes : null,
+          scrapFactor: (values.scrapPercent ?? 0) / 100,
+          consumable: values.consumable ?? false,
         });
         message.success('Material updated');
       } else {
@@ -297,6 +311,8 @@ export default function ProcessTab({
           quantity: values.quantity,
           uom: values.uom ? values.uom : undefined,
           notes: values.notes ? values.notes : undefined,
+          scrapFactor: (values.scrapPercent ?? 0) / 100,
+          consumable: values.consumable ?? false,
         });
         message.success('Material added');
       }
@@ -344,6 +360,26 @@ export default function ProcessTab({
         width: 90,
       },
       { title: 'UoM', dataIndex: 'uom', key: 'uom', width: 90 },
+      {
+        title: 'Scrap',
+        key: 'scrapFactor',
+        width: 90,
+        align: 'right',
+        render: (_, m) => (m.scrapFactor > 0 ? `${(m.scrapFactor * 100).toFixed(1)}%` : '—'),
+      },
+      {
+        title: 'Type',
+        key: 'consumable',
+        width: 120,
+        render: (_, m) =>
+          m.consumable ? (
+            <Tooltip title="Manufacturing-only material — not expected on the eBOM">
+              <Tag color="purple">Consumable</Tag>
+            </Tooltip>
+          ) : (
+            <Tag>Component</Tag>
+          ),
+      },
       {
         title: 'Notes',
         dataIndex: 'notes',
@@ -478,29 +514,49 @@ export default function ProcessTab({
 
   if (!plan) {
     return (
-      <Card>
-        {loading ? (
-          <Skeleton active />
-        ) : (
-          <Empty description="No process plan for this revision">
-            {editable && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                loading={creating}
-                onClick={() => void createPlan()}
-              >
-                Create process plan
-              </Button>
-            )}
-          </Empty>
-        )}
-      </Card>
+      <>
+        <BomReconciliationCard
+          revisionId={revision.id}
+          editable={editable}
+          refreshKey={reconKey}
+          onGenerated={() => {
+            void load();
+            onChanged();
+          }}
+        />
+        <Card>
+          {loading ? (
+            <Skeleton active />
+          ) : (
+            <Empty description="No process plan for this revision">
+              {editable && (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  loading={creating}
+                  onClick={() => void createPlan()}
+                >
+                  Create process plan
+                </Button>
+              )}
+            </Empty>
+          )}
+        </Card>
+      </>
     );
   }
 
   return (
     <>
+      <BomReconciliationCard
+        revisionId={revision.id}
+        editable={editable}
+        refreshKey={reconKey}
+        onGenerated={() => {
+          void load();
+          onChanged();
+        }}
+      />
       <Card
         title={
           <Space direction="vertical" size={0} style={{ paddingBlock: 8 }}>
@@ -634,9 +690,28 @@ export default function ProcessTab({
           >
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="uom" label="UoM">
-            <Input maxLength={20} placeholder="ea" />
-          </Form.Item>
+          <Space size={16} style={{ display: 'flex' }} align="start">
+            <Form.Item name="uom" label="UoM" style={{ width: 120 }}>
+              <Input maxLength={20} placeholder="ea" />
+            </Form.Item>
+            <Form.Item
+              name="scrapPercent"
+              label="Scrap %"
+              style={{ width: 130 }}
+              tooltip="Expected process loss. Reported alongside the nominal quantity, not treated as a discrepancy."
+              rules={[{ type: 'number', min: 0, max: 99, message: '0–99' }]}
+            >
+              <InputNumber min={0} max={99} step={0.5} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item
+              name="consumable"
+              label="Consumable"
+              valuePropName="checked"
+              tooltip="Adhesive, solder, thread-lock — expected to be absent from the eBOM"
+            >
+              <Switch />
+            </Form.Item>
+          </Space>
           <Form.Item name="notes" label="Notes">
             <Input.TextArea rows={2} />
           </Form.Item>

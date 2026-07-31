@@ -15,27 +15,20 @@ import {
   theme,
 } from 'antd';
 import {
-  ApartmentOutlined,
-  ApiOutlined,
   AppstoreOutlined,
   AuditOutlined,
   BarChartOutlined,
   BellOutlined,
-  ControlOutlined,
-  MailOutlined,
-  ProfileOutlined,
+  ProjectOutlined,
+  ShoppingOutlined,
   DashboardOutlined,
-  DiffOutlined,
-  FileTextOutlined,
-  FlagOutlined,
-  HistoryOutlined,
   InboxOutlined,
   LogoutOutlined,
   RocketOutlined,
+  ToolOutlined,
+  SafetyCertificateOutlined,
   SearchOutlined,
   SettingOutlined,
-  TeamOutlined,
-  ThunderboltOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import * as api from '../api/client';
@@ -44,6 +37,40 @@ import { useAuth } from '../auth/AuthContext';
 import { formatDate } from './meta';
 
 const { Sider, Header, Content } = Layout;
+
+/**
+ * Which submenu owns each route key. Drives both the initial open state and re-opening the
+ * right group when navigation (search, deep links) lands inside a closed one.
+ */
+const NAV_PARENT: Record<string, string> = {
+  '/parts': 'grp-product',
+  '/documents': 'grp-product',
+  '/requirements': 'grp-product',
+  '/materials': 'grp-product',
+  '/compare': 'grp-product',
+  '/baselines': 'grp-product',
+  '/configure': 'grp-product',
+  '/ecrs': 'grp-changes',
+  '/ecns': 'grp-changes',
+  '/build-units': 'grp-mfg',
+  '/traceability': 'grp-mfg',
+  '/service': 'grp-mfg',
+  '/quality': 'grp-mfg',
+  '/suppliers': 'grp-sourcing',
+  '/rfqs': 'grp-sourcing',
+  '/catalog-imports': 'grp-sourcing',
+  '/erp': 'grp-sourcing',
+  '/analytics': 'grp-insights',
+  '/activity': 'grp-insights',
+  '/admin/users': 'grp-admin',
+  '/admin/access-groups': 'grp-admin',
+  '/admin/attributes': 'grp-admin',
+  '/admin/workflows': 'grp-admin',
+  '/admin/email': 'grp-admin',
+  '/admin/signatures': 'grp-admin',
+  '/admin/catalog-mappings': 'grp-admin',
+  '/admin/integration': 'grp-admin',
+};
 
 const SEARCH_GROUPS: { title: string; key: keyof SearchResults }[] = [
   { title: 'Parts', key: 'parts' },
@@ -71,6 +98,10 @@ export default function AppLayout() {
   const [unread, setUnread] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
 
+  // Submenus the user has open. The effect below only ever ADDS the group owning the current
+  // route — closing a group stays the user's call.
+  const [openKeys, setOpenKeys] = useState<string[]>([]);
+
   const selectedKey = useMemo(() => {
     const prefixes = [
       '/my-work',
@@ -81,6 +112,15 @@ export default function AppLayout() {
       '/documents',
       '/requirements',
       '/baselines',
+      '/quality',
+      '/catalog-imports',
+      '/materials',
+      '/build-units',
+      '/traceability',
+      '/service',
+      '/projects',
+      '/rfqs',
+      '/suppliers',
       '/activity',
       '/erp',
       '/configure',
@@ -89,11 +129,26 @@ export default function AppLayout() {
       '/admin/attributes',
       '/admin/workflows',
       '/admin/email',
+      '/admin/catalog-mappings',
+      '/admin/access-groups',
+      '/admin/signatures',
       '/admin/integration',
     ];
     const match = prefixes.find((prefix) => location.pathname.startsWith(prefix));
-    return match ?? '/';
+    if (match) return match;
+    // Detail routes that belong to a section without sharing its path prefix.
+    if (location.pathname.startsWith('/ncrs') || location.pathname.startsWith('/capas')) {
+      return '/quality';
+    }
+    return '/';
   }, [location.pathname]);
+
+  useEffect(() => {
+    const parent = NAV_PARENT[selectedKey];
+    if (parent) {
+      setOpenKeys((keys) => (keys.includes(parent) ? keys : [...keys, parent]));
+    }
+  }, [selectedKey]);
 
   useEffect(() => {
     return () => {
@@ -279,32 +334,84 @@ export default function AppLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
           onClick={({ key }) => navigate(key)}
           items={[
             { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
             { key: '/my-work', icon: <InboxOutlined />, label: 'My Work' },
-            { key: '/parts', icon: <AppstoreOutlined />, label: 'Parts' },
-            { key: '/documents', icon: <FileTextOutlined />, label: 'Documents' },
-            { key: '/requirements', icon: <ProfileOutlined />, label: 'Requirements' },
-            { key: '/ecrs', icon: <InboxOutlined />, label: 'Requests' },
-            { key: '/ecns', icon: <AuditOutlined />, label: 'Changes' },
-            { key: '/compare', icon: <DiffOutlined />, label: 'BOM Compare' },
-            { key: '/baselines', icon: <FlagOutlined />, label: 'Baselines' },
-            { key: '/activity', icon: <HistoryOutlined />, label: 'Activity' },
-            { key: '/erp', icon: <ApiOutlined />, label: 'ERP Exchange' },
-            { key: '/configure', icon: <ControlOutlined />, label: 'Configurator' },
-            { key: '/analytics', icon: <BarChartOutlined />, label: 'Analytics' },
+            {
+              key: 'grp-product',
+              icon: <AppstoreOutlined />,
+              label: 'Product',
+              children: [
+                { key: '/parts', label: 'Parts' },
+                { key: '/documents', label: 'Documents' },
+                { key: '/requirements', label: 'Requirements' },
+                { key: '/materials', label: 'Materials' },
+                { key: '/compare', label: 'BOM Compare' },
+                { key: '/baselines', label: 'Baselines' },
+                { key: '/configure', label: 'Configurator' },
+              ],
+            },
+            {
+              key: 'grp-changes',
+              icon: <AuditOutlined />,
+              label: 'Changes',
+              children: [
+                { key: '/ecrs', label: 'Change Requests' },
+                { key: '/ecns', label: 'Change Orders' },
+              ],
+            },
+            {
+              key: 'grp-mfg',
+              icon: <ToolOutlined />,
+              label: 'Manufacturing',
+              children: [
+                { key: '/build-units', label: 'Build Units' },
+                { key: '/traceability', label: 'Traceability' },
+                { key: '/quality', label: 'Quality' },
+                { key: '/service', label: 'Service' },
+              ],
+            },
+            {
+              key: 'grp-sourcing',
+              icon: <ShoppingOutlined />,
+              label: 'Sourcing',
+              children: [
+                { key: '/suppliers', label: 'Suppliers' },
+                { key: '/rfqs', label: 'RFQs' },
+                { key: '/catalog-imports', label: 'Catalog Import' },
+                { key: '/erp', label: 'ERP Exchange' },
+              ],
+            },
+            { key: '/projects', icon: <ProjectOutlined />, label: 'Projects' },
+            {
+              key: 'grp-insights',
+              icon: <BarChartOutlined />,
+              label: 'Insights',
+              children: [
+                { key: '/analytics', label: 'Analytics' },
+                { key: '/activity', label: 'Activity' },
+              ],
+            },
             ...(user?.role === 'ADMIN'
               ? [
                   { type: 'divider' as const },
-                  { key: '/admin/users', icon: <TeamOutlined />, label: 'Users' },
-                  { key: '/admin/attributes', icon: <SettingOutlined />, label: 'Attributes' },
-                  { key: '/admin/workflows', icon: <ApartmentOutlined />, label: 'Workflows' },
-                  { key: '/admin/email', icon: <MailOutlined />, label: 'Email' },
                   {
-                    key: '/admin/integration',
-                    icon: <ThunderboltOutlined />,
-                    label: 'Integration',
+                    key: 'grp-admin',
+                    icon: <SettingOutlined />,
+                    label: 'Admin',
+                    children: [
+                      { key: '/admin/users', label: 'Users' },
+                      { key: '/admin/access-groups', label: 'Access Groups' },
+                      { key: '/admin/attributes', label: 'Attributes' },
+                      { key: '/admin/workflows', label: 'Workflows' },
+                      { key: '/admin/signatures', label: 'Signatures' },
+                      { key: '/admin/email', label: 'Email' },
+                      { key: '/admin/catalog-mappings', label: 'Catalog Mappings' },
+                      { key: '/admin/integration', label: 'Integration' },
+                    ],
                   },
                 ]
               : []),

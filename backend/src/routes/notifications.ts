@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclType, AclUser, visibleIds } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -60,6 +61,95 @@ function currentUserId(req: Request): number {
   return req.user.id;
 }
 
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+// ---------------------------------------------------------------------------
+// Rule X5 — a notification whose target the recipient may no longer read stays
+// listed but loses its link.
+//
+// Deleting or hiding the row would be the wrong fix twice over: the
+// notification is the recipient's own history (they were told something, and
+// that happened), and a disappearing unread badge is a bug report waiting to
+// happen. The title and body were composed at delivery time, when the recipient
+// could read the item, so they stay as written — this is a link check, not a
+// re-authorisation of text the user has already seen and probably e-mailed
+// themselves.
+//
+// What the null buys: clicking a stale link would hit the detail route and 404
+// (correctly, per X2), but a 404 on demand is still a probe — the user learns
+// "this exists but is now closed to me". A dead link says only "not available".
+// ---------------------------------------------------------------------------
+
+/**
+ * Frontend route prefix → the protected type that page shows. Only the five
+ * ACL-bearing types appear here; links to ECRs, NCRs, CAPAs and service records
+ * are left untouched because those types carry no grants of their own.
+ */
+const PROTECTED_LINK_PREFIXES: { prefix: string; type: AclType }[] = [
+  { prefix: '/parts/', type: 'PART' },
+  { prefix: '/documents/', type: 'DOCUMENT' },
+  { prefix: '/ecns/', type: 'ECN' },
+  { prefix: '/projects/', type: 'PROJECT' },
+  { prefix: '/build-units/', type: 'BUILD_UNIT' },
+];
+
+/**
+ * The item a notification link points at, or null when it points at nothing
+ * protected. Tolerates a suffix or query on purpose — `/ecns/5/report` and
+ * `/documents/5?markup=8` are both delivered today and both target id 5.
+ */
+function linkTarget(link: string | null): { type: AclType; id: number } | null {
+  if (!link) return null;
+  for (const { prefix, type } of PROTECTED_LINK_PREFIXES) {
+    if (!link.startsWith(prefix)) continue;
+    const id = Number(link.slice(prefix.length).split(/[/?#]/)[0]);
+    // A link this parser cannot resolve is treated as pointing at nothing rather
+    // than as safe: it cannot be checked, so it must not be checked *and passed*.
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return { type, id };
+  }
+  return null;
+}
+
+/**
+ * Maps rows to DTOs, nulling the link of anything the caller can no longer read.
+ * One `visibleIds` call per distinct type on the page (at most five), never one
+ * per row — a 100-row page must not become 100 queries.
+ */
+async function toItemsWithCheckedLinks(
+  rows: NotificationRow[],
+  user: AclUser
+): Promise<NotificationItemDto[]> {
+  const targets = rows.map((row) => linkTarget(row.link));
+
+  const idsByType = new Map<AclType, number[]>();
+  for (const target of targets) {
+    if (!target) continue;
+    const ids = idsByType.get(target.type);
+    if (ids) ids.push(target.id);
+    else idsByType.set(target.type, [target.id]);
+  }
+
+  const visibleByType = new Map<AclType, Set<number>>();
+  await Promise.all(
+    [...idsByType].map(async ([type, ids]) => {
+      visibleByType.set(type, await visibleIds(type, ids, user));
+    })
+  );
+
+  return rows.map((row, index) => {
+    const item = toNotificationItem(row);
+    const target = targets[index];
+    // `visibleIds` reports a deleted id as invisible too, so a link to something
+    // that no longer exists also goes dead instead of 404ing on click.
+    if (target && !visibleByType.get(target.type)?.has(target.id)) item.link = null;
+    return item;
+  });
+}
+
 function requireBody(req: Request): Record<string, unknown> {
   const body: unknown = req.body;
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -103,8 +193,11 @@ router.get(
       }),
     ]);
 
+    // `total` and `unread` stay unfiltered: they count the caller's own
+    // notification rows, which are not an ACL-bearing type, and a row is listed
+    // either way — only its link can change.
     const payload: NotificationListDto = {
-      items: rows.map(toNotificationItem),
+      items: await toItemsWithCheckedLinks(rows, aclUser(req)),
       total,
       unread,
       page,
@@ -116,6 +209,11 @@ router.get(
 
 // ---------------------------------------------------------------------------
 // POST /notifications/read — mark mine read ({ids: number[]} or {all: true})
+//
+// No ACL check: this writes the caller's own Notification rows, which carry no
+// grants, and it neither reads nor reveals anything about the linked item. The
+// `userId` scope in every `updateMany` below is what keeps it honest, and the
+// response is a count of the caller's own unread rows.
 // ---------------------------------------------------------------------------
 
 router.post(

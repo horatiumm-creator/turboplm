@@ -11,6 +11,7 @@ import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { notifyUsers } from '../lib/notify';
+import { AclUser, aclFilter, assertCanRead, assertCanWrite, visibleIds, REDACTED } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -34,6 +35,30 @@ interface PartRefDto {
   uom: string;
 }
 
+/**
+ * The redacted stand-in for a linked item the caller may not read (rule X4). The four core
+ * fields always come from the shared `REDACTED`; a shape the contract does not declare gets its
+ * own identity fields as the same constant, so nothing of the hidden item's real data survives
+ * while every field the UI reads still exists.
+ */
+interface RedactedRefDto {
+  redacted: true;
+  id: null;
+  partNumber: 'Restricted';
+  name: 'Restricted';
+}
+type RedactedDocumentRefDto = RedactedRefDto & { docNumber: 'Restricted'; title: 'Restricted' };
+type RedactedEcnRefDto = RedactedRefDto & { ecnNumber: 'Restricted' };
+
+const REDACTED_DOCUMENT: RedactedDocumentRefDto = {
+  ...REDACTED,
+  docNumber: 'Restricted',
+  title: 'Restricted',
+};
+// `status` is dropped rather than nulled-out: an ECN's state is real data about a hidden item,
+// and no total on this response is computed from it.
+const REDACTED_ECN: RedactedEcnRefDto = { ...REDACTED, ecnNumber: 'Restricted' };
+
 interface DeliverableDto {
   id: number;
   name: string;
@@ -42,10 +67,10 @@ interface DeliverableDto {
   owner: UserRefDto | null;
   dueDate: string | null;
   notes: string | null;
-  part: PartRefDto | null;
-  document: { id: number; docNumber: string; title: string } | null;
+  part: PartRefDto | RedactedRefDto | null;
+  document: { id: number; docNumber: string; title: string } | RedactedDocumentRefDto | null;
   requirement: { id: number; reqNumber: string; title: string } | null;
-  ecn: { id: number; ecnNumber: string; status: EcnStatus } | null;
+  ecn: { id: number; ecnNumber: string; status: EcnStatus } | RedactedEcnRefDto | null;
 }
 
 interface PhaseDto {
@@ -105,13 +130,60 @@ const projectInclude = {
   },
 } satisfies Prisma.ProjectInclude;
 
+/**
+ * The list endpoint's include. Deliberately does NOT reach deliverables: the summary shape has
+ * no field they feed, and a query that never loads a part, document or ECN cannot leak one
+ * (rule X3). Everything ProjectSummary needs comes off the phase rows themselves.
+ */
+const summaryInclude = {
+  owner: { select: { id: true, name: true } },
+  phases: {
+    orderBy: { seq: 'asc' as const },
+    select: { id: true, seq: true, name: true, status: true },
+  },
+} satisfies Prisma.ProjectInclude;
+
 type ProjectRow = Prisma.ProjectGetPayload<{ include: typeof projectInclude }>;
+type ProjectSummaryRow = Prisma.ProjectGetPayload<{ include: typeof summaryInclude }>;
 type DeliverableRow = ProjectRow['phases'][number]['deliverables'][number];
+
+/**
+ * Which of the protected types a deliverable can point at this caller may read, resolved once
+ * per response instead of per link (rule X3). Requirements are absent on purpose: `Requirement`
+ * is not one of the five ACL-bearing types, so it needs no filtering here.
+ */
+interface LinkVisibility {
+  parts: Set<number>;
+  documents: Set<number>;
+  ecns: Set<number>;
+}
+
+/** Three bulk queries for a whole project, never one per deliverable. */
+async function linkVisibility(project: ProjectRow, user: AclUser): Promise<LinkVisibility> {
+  const partIds: number[] = [];
+  const documentIds: number[] = [];
+  const ecnIds: number[] = [];
+  for (const phase of project.phases) {
+    for (const deliverable of phase.deliverables) {
+      if (deliverable.part) partIds.push(deliverable.part.id);
+      if (deliverable.document) documentIds.push(deliverable.document.id);
+      if (deliverable.ecn) ecnIds.push(deliverable.ecn.id);
+    }
+  }
+  const [parts, documents, ecns] = await Promise.all([
+    visibleIds('PART', partIds, user),
+    visibleIds('DOCUMENT', documentIds, user),
+    visibleIds('ECN', ecnIds, user),
+  ]);
+  return { parts, documents, ecns };
+}
 
 const isBlocking = (d: { required: boolean; status: DeliverableStatus }) =>
   d.required && d.status !== DeliverableStatus.COMPLETE && d.status !== DeliverableStatus.WAIVED;
 
-function toDeliverable(d: DeliverableRow): DeliverableDto {
+function toDeliverable(d: DeliverableRow, vis: LinkVisibility): DeliverableDto {
+  // A restricted link is redacted, never dropped (rule X4). Dropping it would make a gate look
+  // unencumbered — a required deliverable whose evidence the reader cannot see still blocks.
   return {
     id: d.id,
     name: d.name,
@@ -121,25 +193,56 @@ function toDeliverable(d: DeliverableRow): DeliverableDto {
     dueDate: d.dueDate ? d.dueDate.toISOString() : null,
     notes: d.notes,
     part: d.part
-      ? {
-          id: d.part.id,
-          partNumber: d.part.partNumber,
-          name: d.part.name,
-          category: d.part.category,
-          uom: d.part.uom,
-        }
+      ? vis.parts.has(d.part.id)
+        ? {
+            id: d.part.id,
+            partNumber: d.part.partNumber,
+            name: d.part.name,
+            category: d.part.category,
+            uom: d.part.uom,
+          }
+        : REDACTED
       : null,
     document: d.document
-      ? { id: d.document.id, docNumber: d.document.docNumber, title: d.document.title }
+      ? vis.documents.has(d.document.id)
+        ? { id: d.document.id, docNumber: d.document.docNumber, title: d.document.title }
+        : REDACTED_DOCUMENT
       : null,
     requirement: d.requirement
       ? { id: d.requirement.id, reqNumber: d.requirement.reqNumber, title: d.requirement.title }
       : null,
-    ecn: d.ecn ? { id: d.ecn.id, ecnNumber: d.ecn.ecnNumber, status: d.ecn.status } : null,
+    ecn: d.ecn
+      ? vis.ecns.has(d.ecn.id)
+        ? { id: d.ecn.id, ecnNumber: d.ecn.ecnNumber, status: d.ecn.status }
+        : REDACTED_ECN
+      : null,
   };
 }
 
-function toProjectDetail(project: ProjectRow): ProjectDetailDto {
+/**
+ * Summary from phase rows alone. `ProjectRow` is a superset of `ProjectSummaryRow`, so the
+ * detail mapper reuses this rather than recomputing the same three phase aggregates.
+ */
+function toProjectSummary(project: ProjectSummaryRow): ProjectSummaryDto {
+  const current = project.phases.find((p) => p.status !== GateStatus.PASSED) ?? null;
+  return {
+    id: project.id,
+    code: project.code,
+    name: project.name,
+    status: project.status,
+    owner: { id: project.owner.id, name: project.owner.name },
+    startDate: project.startDate ? project.startDate.toISOString() : null,
+    targetDate: project.targetDate ? project.targetDate.toISOString() : null,
+    phaseCount: project.phases.length,
+    passedPhases: project.phases.filter((p) => p.status === GateStatus.PASSED).length,
+    currentPhase: current
+      ? { id: current.id, seq: current.seq, name: current.name, status: current.status }
+      : null,
+    createdAt: project.createdAt.toISOString(),
+  };
+}
+
+function toProjectDetail(project: ProjectRow, vis: LinkVisibility): ProjectDetailDto {
   const phases: PhaseDto[] = project.phases.map((phase) => ({
     id: phase.id,
     seq: phase.seq,
@@ -149,45 +252,58 @@ function toProjectDetail(project: ProjectRow): ProjectDetailDto {
     targetDate: phase.targetDate ? phase.targetDate.toISOString() : null,
     passedAt: phase.passedAt ? phase.passedAt.toISOString() : null,
     passedBy: phase.passedBy ? { id: phase.passedBy.id, name: phase.passedBy.name } : null,
-    deliverables: phase.deliverables.map(toDeliverable),
+    deliverables: phase.deliverables.map((d) => toDeliverable(d, vis)),
+    // Counted from statuses, never from the linked items, so a redacted link cannot make this
+    // number lie — which is why this response needs no `redactedCount` (rule X4).
     blockingCount: phase.deliverables.filter(isBlocking).length,
   }));
-  const current = phases.find((p) => p.status !== GateStatus.PASSED) ?? null;
 
   return {
-    id: project.id,
-    code: project.code,
-    name: project.name,
-    status: project.status,
-    owner: { id: project.owner.id, name: project.owner.name },
-    startDate: project.startDate ? project.startDate.toISOString() : null,
-    targetDate: project.targetDate ? project.targetDate.toISOString() : null,
-    phaseCount: phases.length,
-    passedPhases: phases.filter((p) => p.status === GateStatus.PASSED).length,
-    currentPhase: current
-      ? { id: current.id, seq: current.seq, name: current.name, status: current.status }
-      : null,
-    createdAt: project.createdAt.toISOString(),
+    ...toProjectSummary(project),
     description: project.description,
     createdBy: { id: project.createdBy.id, name: project.createdBy.name },
     phases,
   };
 }
 
-async function getProjectDetailOrThrow(id: number): Promise<ProjectDetailDto> {
-  const project = await prisma.project.findUnique({ where: { id }, include: projectInclude });
+/**
+ * Every path that returns a project detail goes through here, so the read filter is applied
+ * once. `findFirst` rather than `findUnique` because `findUnique` cannot take the filter — and
+ * a project the caller may not read must 404 exactly as a deleted one does (rule X2).
+ */
+async function getProjectDetailOrThrow(id: number, user: AclUser): Promise<ProjectDetailDto> {
+  const project = await prisma.project.findFirst({
+    where: { id, ...aclFilter('PROJECT', user) },
+    include: projectInclude,
+  });
   if (!project) throw new HttpError(404, 'Project not found');
-  return toProjectDetail(project);
+  return toProjectDetail(project, await linkVisibility(project, user));
 }
 
-/** Resolve the project id owning a phase / deliverable, 404 when missing. */
-async function projectIdOfPhase(phaseId: number): Promise<number> {
-  const phase = await prisma.projectPhase.findUnique({
-    where: { id: phaseId },
+/**
+ * Resolve the project id owning a phase, only when the caller may read that project.
+ *
+ * The lookup is scoped by the project's read filter and the 404 stays the phase's own message:
+ * answering 'Project not found' here would tell a caller probing phase ids that the phase
+ * exists, which is exactly the disclosure the 404-not-403 rule exists to prevent.
+ */
+async function projectIdOfPhase(phaseId: number, user: AclUser): Promise<number> {
+  const phase = await prisma.projectPhase.findFirst({
+    where: { id: phaseId, project: aclFilter('PROJECT', user) },
     select: { projectId: true },
   });
   if (!phase) throw new HttpError(404, 'Phase not found');
   return phase.projectId;
+}
+
+/** Same reasoning one level down: a deliverable of an unreadable project simply does not exist. */
+async function projectIdOfDeliverable(deliverableId: number, user: AclUser): Promise<number> {
+  const row = await prisma.projectDeliverable.findFirst({
+    where: { id: deliverableId, phase: { project: aclFilter('PROJECT', user) } },
+    select: { phase: { select: { projectId: true } } },
+  });
+  if (!row) throw new HttpError(404, 'Deliverable not found');
+  return row.phase.projectId;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +313,11 @@ async function projectIdOfPhase(phaseId: number): Promise<number> {
 function currentUserId(req: Request): number {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
   return req.user.id;
+}
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
 }
 
 function requireBody(req: Request): Record<string, unknown> {
@@ -253,23 +374,22 @@ function parseEnum<T extends Record<string, string>>(
 }
 
 /** Validate the optional entity links on a deliverable; 404 names the missing one. */
-async function assertLinksExist(links: {
-  partId: number | null;
-  documentId: number | null;
-  requirementId: number | null;
-  ecnId: number | null;
-}): Promise<void> {
-  if (links.partId !== null) {
-    const row = await prisma.part.findUnique({ where: { id: links.partId }, select: { id: true } });
-    if (!row) throw new HttpError(404, 'Part not found');
-  }
-  if (links.documentId !== null) {
-    const row = await prisma.document.findUnique({
-      where: { id: links.documentId },
-      select: { id: true },
-    });
-    if (!row) throw new HttpError(404, 'Document not found');
-  }
+/**
+ * Link targets are read-checked through `assertCanRead`, so a restricted part, document or ECN
+ * answers exactly like a missing one — linking an item to a deliverable would otherwise confirm
+ * it exists. Requirements are not one of the five protected types; a plain existence check.
+ */
+async function assertLinksExist(
+  links: {
+    partId: number | null;
+    documentId: number | null;
+    requirementId: number | null;
+    ecnId: number | null;
+  },
+  user: AclUser
+): Promise<void> {
+  if (links.partId !== null) await assertCanRead('PART', links.partId, user);
+  if (links.documentId !== null) await assertCanRead('DOCUMENT', links.documentId, user);
   if (links.requirementId !== null) {
     const row = await prisma.requirement.findUnique({
       where: { id: links.requirementId },
@@ -277,10 +397,7 @@ async function assertLinksExist(links: {
     });
     if (!row) throw new HttpError(404, 'Requirement not found');
   }
-  if (links.ecnId !== null) {
-    const row = await prisma.ecn.findUnique({ where: { id: links.ecnId }, select: { id: true } });
-    if (!row) throw new HttpError(404, 'ECN not found');
-  }
+  if (links.ecnId !== null) await assertCanRead('ECN', links.ecnId, user);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,9 +407,14 @@ async function assertLinksExist(links: {
 router.get(
   '/projects',
   asyncHandler(async (req, res) => {
+    const user = aclUser(req);
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
-    const where: Prisma.ProjectWhereInput = {};
+    // The acl fragment nests under its own AND, so spreading it beside `status` is safe, and
+    // the same `where` feeds count and page — the total never admits to hidden projects.
+    const where: Prisma.ProjectWhereInput = {
+      ...(aclFilter('PROJECT', user) as Prisma.ProjectWhereInput),
+    };
     if (typeof req.query.status === 'string' && req.query.status) {
       where.status = parseEnum(req.query.status, ProjectStatus, 'status');
     }
@@ -303,15 +425,10 @@ router.get(
         orderBy: { id: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: projectInclude,
+        include: summaryInclude,
       }),
     ]);
-    // ProjectSummary is ProjectDetail without the heavy fields.
-    const items = rows.map((row) => {
-      const { description: _d, createdBy: _c, phases: _p, ...summary } = toProjectDetail(row);
-      return summary;
-    });
-    res.json({ items, total, page, pageSize });
+    res.json({ items: rows.map(toProjectSummary), total, page, pageSize });
   })
 );
 
@@ -390,14 +507,14 @@ router.post(
       }).catch((err) => console.error('Project notify failed:', err));
     }
 
-    res.status(201).json(await getProjectDetailOrThrow(created.id));
+    res.status(201).json(await getProjectDetailOrThrow(created.id, aclUser(req)));
   })
 );
 
 router.get(
   '/projects/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getProjectDetailOrThrow(idParam(req.params.id)));
+    res.json(await getProjectDetailOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -405,9 +522,10 @@ router.patch(
   '/projects/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Rule X3 — 404/403 resolved before the body is even parsed.
+    await assertCanWrite('PROJECT', id, user);
     const body = requireBody(req);
-    const project = await prisma.project.findUnique({ where: { id }, select: { id: true } });
-    if (!project) throw new HttpError(404, 'Project not found');
 
     const data: Prisma.ProjectUncheckedUpdateInput = {};
     if (body.name !== undefined) data.name = requireText(body.name, 'name');
@@ -424,7 +542,7 @@ router.patch(
     }
 
     await prisma.project.update({ where: { id }, data });
-    res.json(await getProjectDetailOrThrow(id));
+    res.json(await getProjectDetailOrThrow(id, user));
   })
 );
 
@@ -436,9 +554,9 @@ router.post(
   '/projects/:id/phases',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    await assertCanWrite('PROJECT', id, user);
     const body = requireBody(req);
-    const project = await prisma.project.findUnique({ where: { id }, select: { id: true } });
-    if (!project) throw new HttpError(404, 'Project not found');
 
     const name = requireText(body.name, 'name');
     const gateCriteria = body.gateCriteria === undefined ? null : optionalText(body.gateCriteria, 'gateCriteria');
@@ -451,7 +569,7 @@ router.post(
     await prisma.projectPhase.create({
       data: { projectId: id, seq: (agg._max.seq ?? 0) + 1, name, gateCriteria, targetDate },
     });
-    res.status(201).json(await getProjectDetailOrThrow(id));
+    res.status(201).json(await getProjectDetailOrThrow(id, user));
   })
 );
 
@@ -464,15 +582,18 @@ router.post(
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
     const userId = currentUserId(req);
+    const user = aclUser(req);
 
-    const phase = await prisma.projectPhase.findUnique({
-      where: { id },
+    // Scoped through the project's read filter: a phase of a hidden project does not exist.
+    const phase = await prisma.projectPhase.findFirst({
+      where: { id, project: aclFilter('PROJECT', user) as Prisma.ProjectWhereInput },
       include: {
         deliverables: { select: { name: true, required: true, status: true } },
         project: { select: { id: true } },
       },
     });
     if (!phase) throw new HttpError(404, 'Phase not found');
+    await assertCanWrite('PROJECT', phase.projectId, user);
     if (phase.status === GateStatus.PASSED) {
       throw new HttpError(409, `Gate ${phase.name} has already been passed`);
     }
@@ -511,7 +632,7 @@ router.post(
       }
     });
 
-    res.json(await getProjectDetailOrThrow(phase.projectId));
+    res.json(await getProjectDetailOrThrow(phase.projectId, user));
   })
 );
 
@@ -523,8 +644,10 @@ router.post(
   '/project-phases/:id/deliverables',
   asyncHandler(async (req, res) => {
     const phaseId = idParam(req.params.id);
+    const user = aclUser(req);
+    const projectId = await projectIdOfPhase(phaseId, user);
+    await assertCanWrite('PROJECT', projectId, user);
     const body = requireBody(req);
-    const projectId = await projectIdOfPhase(phaseId);
 
     const name = requireText(body.name, 'name');
     const required = body.required === undefined ? true : Boolean(body.required);
@@ -539,7 +662,7 @@ router.post(
       requirementId: optionalId(body.requirementId, 'requirementId'),
       ecnId: optionalId(body.ecnId, 'ecnId'),
     };
-    await assertLinksExist(links);
+    await assertLinksExist(links, user);
 
     await prisma.projectDeliverable.create({
       data: {
@@ -552,7 +675,7 @@ router.post(
         ...links,
       },
     });
-    res.status(201).json(await getProjectDetailOrThrow(projectId));
+    res.status(201).json(await getProjectDetailOrThrow(projectId, user));
   })
 );
 
@@ -560,13 +683,11 @@ router.patch(
   '/deliverables/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Resolves through the project's read filter and 404s with the deliverable's own message.
+    const projectId = await projectIdOfDeliverable(id, user);
+    await assertCanWrite('PROJECT', projectId, user);
     const body = requireBody(req);
-    const deliverable = await prisma.projectDeliverable.findUnique({
-      where: { id },
-      select: { id: true, phaseId: true },
-    });
-    if (!deliverable) throw new HttpError(404, 'Deliverable not found');
-    const projectId = await projectIdOfPhase(deliverable.phaseId);
 
     const data: Prisma.ProjectDeliverableUncheckedUpdateInput = {};
     if (body.name !== undefined) data.name = requireText(body.name, 'name');
@@ -583,7 +704,7 @@ router.patch(
     }
 
     await prisma.projectDeliverable.update({ where: { id }, data });
-    res.json(await getProjectDetailOrThrow(projectId));
+    res.json(await getProjectDetailOrThrow(projectId, user));
   })
 );
 
@@ -591,11 +712,9 @@ router.delete(
   '/deliverables/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const deliverable = await prisma.projectDeliverable.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (!deliverable) throw new HttpError(404, 'Deliverable not found');
+    const user = aclUser(req);
+    const projectId = await projectIdOfDeliverable(id, user);
+    await assertCanWrite('PROJECT', projectId, user);
     await prisma.projectDeliverable.delete({ where: { id } });
     res.status(204).end();
   })

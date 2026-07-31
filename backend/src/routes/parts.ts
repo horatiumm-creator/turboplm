@@ -1,9 +1,25 @@
 import { Request, Router } from 'express';
-import { AttributeType, EcnStatus, Lifecycle, PartCategory, Prisma } from '@prisma/client';
+import {
+  AttributeType,
+  EcnStatus,
+  Lifecycle,
+  PartCategory,
+  Prisma,
+  SignedEntityType,
+} from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
-import { escapeLike, generatePartNumber, nextRevisionLabel } from '../lib/plm';
+import {
+  aclFilter,
+  assertCanRead,
+  assertCanWrite,
+  visibleIds,
+  REDACTED,
+  type AclUser,
+} from '../lib/acl';
+import { escapeLike, generatePartNumber, nextRevisionLabel, withNumberLock } from '../lib/plm';
+import { assertSignaturesComplete } from './signatures';
 import { emitEvent } from '../lib/webhooks';
 
 const router = Router();
@@ -96,6 +112,67 @@ interface PagedDto<T> {
 }
 
 // ---------------------------------------------------------------------------
+// Access control helpers (rule X3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The ACL principal for this request. Separate from `currentUserId` because access control
+ * needs the role as well, and the acl module deliberately accepts nothing wider than the two
+ * fields it uses.
+ */
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+/**
+ * `aclFilter` is typed as `object` so one fragment serves all five protected models; these
+ * wrappers name the model at the single point that knows which one is being filtered, so a
+ * fragment can never be dropped into the wrong `where` unnoticed.
+ */
+function partAcl(user: AclUser): Prisma.PartWhereInput {
+  return aclFilter('PART', user) as Prisma.PartWhereInput;
+}
+
+function ecnAcl(user: AclUser): Prisma.EcnWhereInput {
+  return aclFilter('ECN', user) as Prisma.EcnWhereInput;
+}
+
+/**
+ * A PartRevision carries no grants of its own — it inherits its part's — so every revision
+ * route resolves the revision *through* the part's read filter.
+ *
+ * Why not load the revision and then `assertCanRead('PART', partId)`: that answers
+ * 'Part not found' for a revision whose part is restricted, while a genuinely missing revision
+ * id answers 'Revision not found'. The difference between the two messages is an existence
+ * oracle for revision ids, so both cases must fail identically.
+ */
+async function readableRevisionOrThrow(
+  revisionId: number,
+  user: AclUser
+): Promise<{ id: number; partId: number }> {
+  const revision = await prisma.partRevision.findFirst({
+    where: { id: revisionId, part: partAcl(user) },
+    select: { id: true, partId: true },
+  });
+  if (!revision) throw new HttpError(404, 'Revision not found');
+  return revision;
+}
+
+/**
+ * Read gate first, then the write gate on the owning part: a 403 is only ever shown to someone
+ * who has already been told the revision exists.
+ */
+async function writableRevisionOrThrow(
+  revisionId: number,
+  user: AclUser
+): Promise<{ id: number; partId: number }> {
+  const revision = await readableRevisionOrThrow(revisionId, user);
+  await assertCanWrite('PART', revision.partId, user);
+  return revision;
+}
+
+// ---------------------------------------------------------------------------
 // Fetch helpers + mappers
 // ---------------------------------------------------------------------------
 
@@ -119,15 +196,23 @@ async function getPartDetailOrThrow(id: number) {
   return part;
 }
 
-async function fetchRevisionDetail(id: number) {
+async function fetchRevisionDetail(id: number, user: AclUser) {
   return prisma.partRevision.findUnique({
     where: { id },
     include: {
       createdBy: { select: { id: true, name: true } },
       part: true,
+      // Counts every line on this revision's BOM, including lines whose child part is
+      // restricted. That is deliberate: the BOM itself returns those lines as redacted nodes
+      // (rule X4), so a filtered count here would contradict the list it labels.
       _count: { select: { bomLines: true } },
       processPlan: { select: { id: true } },
       ecnItemsTo: {
+        // The ECN link is a nested read of a protected type, and an `include` carries no
+        // filter of its own — without this a restricted ECN is named on every revision it
+        // touches. Filtered rather than redacted because the field is a single reference with
+        // no quantity to keep honest: the caller gets their newest visible link, or null.
+        where: { ecn: ecnAcl(user) },
         orderBy: { id: 'desc' as const },
         select: { ecn: { select: { id: true, ecnNumber: true, status: true } } },
       },
@@ -135,8 +220,8 @@ async function fetchRevisionDetail(id: number) {
   });
 }
 
-async function getRevisionDetailOrThrow(id: number) {
-  const revision = await fetchRevisionDetail(id);
+async function getRevisionDetailOrThrow(id: number, user: AclUser) {
+  const revision = await fetchRevisionDetail(id, user);
   if (!revision) throw new HttpError(404, 'Revision not found');
   return revision;
 }
@@ -345,6 +430,7 @@ const PART_NUMBER_RE = /^[A-Za-z0-9._-]+$/;
 router.get(
   '/parts',
   asyncHandler(async (req, res) => {
+    const user = aclUser(req);
     const page = parsePositiveInt(req.query.page, 'page', 1);
     let pageSize = parsePositiveInt(req.query.pageSize, 'pageSize', 20);
     if (pageSize > 100) pageSize = 100;
@@ -378,7 +464,9 @@ router.get(
     }
 
     const parts = await prisma.part.findMany({
-      where,
+      // Nested rather than spread: `where` already carries a top-level `OR` when a search term
+      // is given, and the acl fragment must compose with it instead of racing it for a key.
+      where: { AND: [where, partAcl(user)] },
       orderBy: { partNumber: 'asc' },
       include: {
         createdBy: { select: { id: true, name: true } },
@@ -445,8 +533,8 @@ router.post(
       if (existing) throw new HttpError(409, `Part number ${partNumber} already exists`);
     }
 
-    const createPartRecord = (pn: string) =>
-      prisma.part.create({
+    const createPartRecord = (pn: string, db: Prisma.TransactionClient = prisma) =>
+      db.part.create({
         data: {
           partNumber: pn,
           name,
@@ -462,18 +550,20 @@ router.post(
         select: { id: true },
       });
 
-    // Auto numbers can only collide under concurrent creates — regenerate and retry.
+    // Scan-and-insert under the numbering lock so concurrent creates queue instead of all
+    // reading the same maximum. The retry stays as a backstop for a number a user typed
+    // manually between the scan and the insert.
     const created = autoNumber
-      ? await (async () => {
+      ? await withNumberLock(async (tx) => {
           for (let attempt = 0; ; attempt++) {
             try {
-              return await createPartRecord(await generatePartNumber());
+              return await createPartRecord(await generatePartNumber(tx), tx);
             } catch (err) {
               if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
               throw err;
             }
           }
-        })()
+        })
       : await createPartRecord(partNumber);
 
     const detail = await getPartDetailOrThrow(created.id);
@@ -489,6 +579,7 @@ router.get(
   '/parts/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    await assertCanRead('PART', id, aclUser(req));
     const part = await getPartDetailOrThrow(id);
     res.json(await toPartDetail(part));
   })
@@ -502,10 +593,12 @@ router.patch(
   '/parts/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const body = requireBody(req);
+    // Rule X3 — before any body validation. A 400 naming a field, or the old existence check,
+    // would both confirm the part exists to a caller who may not know that. This also replaces
+    // that existence check: an unreadable and a missing part both 404 here.
+    await assertCanWrite('PART', id, aclUser(req));
 
-    const existing = await prisma.part.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw new HttpError(404, 'Part not found');
+    const body = requireBody(req);
 
     const data: Prisma.PartUpdateInput = {};
     if ('name' in body) data.name = requiredString(body, 'name');
@@ -533,9 +626,10 @@ router.delete(
   '/parts/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-
-    const existing = await prisma.part.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw new HttpError(404, 'Part not found');
+    // Ahead of the reference counts: those 409s describe how the part is used, which is more
+    // than a caller who cannot read it should learn (rule X3). Replaces the existence check —
+    // missing and unreadable both 404 with the same message.
+    await assertCanWrite('PART', id, aclUser(req));
 
     const [bomRefs, materialRefs, ecnRefs, baselineRefs, alternateRefs] = await Promise.all([
       prisma.bomLine.count({ where: { childPartId: id } }),
@@ -570,6 +664,9 @@ router.post(
   '/parts/:id/revisions',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Revising creates a revision of this part, so it is a write on the part.
+    await assertCanWrite('PART', id, user);
     const userId = currentUserId(req);
 
     const part = await prisma.part.findUnique({
@@ -616,6 +713,9 @@ router.post(
         select: { id: true },
       });
 
+      // The structure is copied wholesale, children the caller cannot read included. Nothing
+      // about them is disclosed (the response carries no child identities), and dropping them
+      // would silently mutilate the new revision's BOM — the write-side reading of rule X4.
       if (latest.bomLines.length > 0) {
         await tx.bomLine.createMany({
           data: latest.bomLines.map((line) => ({
@@ -686,7 +786,7 @@ router.post(
       return rev.id;
     });
 
-    const detail = await getRevisionDetailOrThrow(newRevisionId);
+    const detail = await getRevisionDetailOrThrow(newRevisionId, user);
     res.status(201).json(toRevisionDetail(detail));
   })
 );
@@ -699,7 +799,9 @@ router.get(
   '/revisions/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const revision = await getRevisionDetailOrThrow(id);
+    const user = aclUser(req);
+    await readableRevisionOrThrow(id, user);
+    const revision = await getRevisionDetailOrThrow(id, user);
     res.json(toRevisionDetail(revision));
   })
 );
@@ -712,6 +814,11 @@ router.patch(
   '/revisions/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Access first, then the body, then the lifecycle gate: the 409 below quotes the
+    // revision's label and state, which is already more than an outsider may learn.
+    await writableRevisionOrThrow(id, user);
+
     const body = requireBody(req);
 
     const revision = await prisma.partRevision.findUnique({
@@ -731,7 +838,7 @@ router.patch(
       await prisma.partRevision.update({ where: { id }, data: { changeNote } });
     }
 
-    const detail = await getRevisionDetailOrThrow(id);
+    const detail = await getRevisionDetailOrThrow(id, user);
     res.json(toRevisionDetail(detail));
   })
 );
@@ -753,6 +860,10 @@ router.post(
   '/revisions/:id/transition',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Rule X3 — ahead of the action parse: every refusal below quotes the revision's state.
+    await writableRevisionOrThrow(id, user);
+
     const body = requireBody(req);
 
     const action = body.action;
@@ -774,17 +885,23 @@ router.post(
     if (!revision) throw new HttpError(404, 'Revision not found');
 
     // Rule E7 — revisions managed by an active ECN are progressed via the ECN.
+    // The lookup itself is deliberately NOT acl-filtered: an ECN the caller cannot see still
+    // governs this revision, and filtering it away would let them bypass the gate entirely.
+    // Only the message is redacted.
     const managedBy = await prisma.ecnItem.findFirst({
       where: {
         toRevisionId: id,
         ecn: { status: { in: [EcnStatus.DRAFT, EcnStatus.IN_REVIEW, EcnStatus.APPROVED] } },
       },
-      include: { ecn: { select: { ecnNumber: true, status: true } } },
+      include: { ecn: { select: { id: true, ecnNumber: true, status: true } } },
     });
     if (managedBy) {
+      const visibleEcns = await visibleIds('ECN', [managedBy.ecn.id], user);
       throw new HttpError(
         409,
-        `Revision is managed by ${managedBy.ecn.ecnNumber} (${managedBy.ecn.status}) — progress the change through the ECN`
+        visibleEcns.has(managedBy.ecn.id)
+          ? `Revision is managed by ${managedBy.ecn.ecnNumber} (${managedBy.ecn.status}) — progress the change through the ECN`
+          : 'Revision is managed by a restricted ECN — progress the change through the ECN'
       );
     }
 
@@ -795,6 +912,14 @@ router.post(
       );
     }
 
+    // Rule S4 — a revision released on its own needs its signature manifest complete.
+    // A revision released *through* an ECN is gated by that ECN's manifest instead, so it
+    // is not asked to satisfy both. Checked outside the transaction because voiding stale
+    // signatures writes, and this must not sit inside the conditional-update window.
+    if (action === 'approve' && !managedBy) {
+      await assertSignaturesComplete(SignedEntityType.REVISION, id, 'release');
+    }
+
     await prisma.$transaction(async (tx) => {
       if (action === 'approve') {
         // Rule 2 — release gate: every BOM child part must have a RELEASED revision.
@@ -803,19 +928,30 @@ router.post(
           include: {
             childPart: {
               select: {
+                id: true,
                 partNumber: true,
                 revisions: { select: { lifecycle: true } },
               },
             },
           },
         });
-        const offenders = lines
-          .filter(
-            (line) => !line.childPart.revisions.some((r) => r.lifecycle === Lifecycle.RELEASED)
-          )
-          .map((line) => line.childPart.partNumber)
-          .sort();
-        if (offenders.length > 0) {
+        const offending = lines.filter(
+          (line) => !line.childPart.revisions.some((r) => r.lifecycle === Lifecycle.RELEASED)
+        );
+        if (offending.length > 0) {
+          // The gate must still block on a restricted child — the release would otherwise
+          // depend on who is looking — but naming it would leak a part number through an
+          // error message. One name per offender, so the count stays honest.
+          const visible = await visibleIds(
+            'PART',
+            offending.map((line) => line.childPart.id),
+            user
+          );
+          const offenders = offending
+            .map((line) =>
+              visible.has(line.childPart.id) ? line.childPart.partNumber : REDACTED.partNumber
+            )
+            .sort();
           throw new HttpError(
             409,
             `Cannot release: child parts without a released revision: ${offenders.join(', ')}`
@@ -854,7 +990,7 @@ router.post(
       }
     });
 
-    const detail = await getRevisionDetailOrThrow(id);
+    const detail = await getRevisionDetailOrThrow(id, user);
     res.json(toRevisionDetail(detail));
   })
 );

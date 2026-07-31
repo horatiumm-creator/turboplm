@@ -1,12 +1,18 @@
-import { Router } from 'express';
-import { Lifecycle, PartCategory } from '@prisma/client';
+import { Request, Router } from 'express';
+import { Lifecycle, PartCategory, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { resolveDisplayRevision } from '../lib/plm';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
 
 const MAX_DEPTH = 15;
 
@@ -29,7 +35,7 @@ interface PartRefDto {
 }
 
 interface CostRollupNodeDto {
-  part: PartRefDto;
+  part: PartRefDto | typeof REDACTED;
   quantity: number;
   unitCost: number | null;
   /** unitCost when set, else the sum of children's extended costs (null if unknowable). */
@@ -91,26 +97,32 @@ async function buildCostLevel(
   parentRevisionId: number,
   ancestorPartIds: ReadonlySet<number>,
   depth: number,
-  missingCosts: Set<string>
+  missingCosts: Set<string>,
+  user: AclUser
 ): Promise<CostRollupNodeDto[]> {
   const lines = await prisma.bomLine.findMany({
     where: { parentRevisionId },
     orderBy: { findNumber: 'asc' },
     include: lineInclude,
   });
+  const visible = await visibleIds('PART', lines.map((line) => line.childPartId), user);
 
   const nodes: CostRollupNodeDto[] = [];
   for (const line of lines) {
-    const resolved = resolveDisplayRevision(line.childPart.revisions);
-    const cycle = ancestorPartIds.has(line.childPartId);
+    // Rule X4 — a hidden child contributes an UNKNOWN cost, which nulls every total above it
+    // exactly as an unpriced part does. Skipping it would produce a smaller number that still
+    // looks authoritative; its unit cost is its own data and is withheld with its identity.
+    const hidden = !visible.has(line.childPartId);
+    const resolved = hidden ? null : resolveDisplayRevision(line.childPart.revisions);
+    const cycle = !hidden && ancestorPartIds.has(line.childPartId);
     let children: CostRollupNodeDto[] = [];
-    if (!cycle && resolved && depth < MAX_DEPTH) {
+    if (!hidden && !cycle && resolved && depth < MAX_DEPTH) {
       const branch = new Set(ancestorPartIds);
       branch.add(line.childPartId);
-      children = await buildCostLevel(resolved.id, branch, depth + 1, missingCosts);
+      children = await buildCostLevel(resolved.id, branch, depth + 1, missingCosts, user);
     }
 
-    const unitCost = line.childPart.unitCost;
+    const unitCost = hidden ? null : line.childPart.unitCost;
     const effectiveUnitCost =
       unitCost !== null
         ? unitCost
@@ -120,10 +132,10 @@ async function buildCostLevel(
     const extendedCost = effectiveUnitCost === null ? null : effectiveUnitCost * line.quantity;
 
     const missing = unitCost === null && children.length === 0;
-    if (missing) missingCosts.add(line.childPart.partNumber);
+    if (missing) missingCosts.add(hidden ? REDACTED.name : line.childPart.partNumber);
 
     nodes.push({
-      part: toPartRef(line.childPart),
+      part: hidden ? { ...REDACTED } : toPartRef(line.childPart),
       quantity: line.quantity,
       unitCost,
       effectiveUnitCost,
@@ -143,14 +155,15 @@ router.get(
   '/revisions/:id/cost-rollup',
   asyncHandler(async (req, res) => {
     const revisionId = idParam(req.params.id);
-    const revision = await prisma.partRevision.findUnique({
-      where: { id: revisionId },
+    const user = aclUser(req);
+    const revision = await prisma.partRevision.findFirst({
+      where: { id: revisionId, part: aclFilter('PART', user) as Prisma.PartWhereInput },
       include: { part: true },
     });
     if (!revision) throw new HttpError(404, 'Revision not found');
 
     const missingCosts = new Set<string>();
-    const nodes = await buildCostLevel(revision.id, new Set([revision.partId]), 1, missingCosts);
+    const nodes = await buildCostLevel(revision.id, new Set([revision.partId]), 1, missingCosts, user);
 
     const result: CostRollupDto = {
       revision: { id: revision.id, revision: revision.revision, lifecycle: revision.lifecycle },

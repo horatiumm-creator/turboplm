@@ -1,8 +1,9 @@
-import { Router } from 'express';
-import { Lifecycle, PartCategory } from '@prisma/client';
+import { Request, Router } from 'express';
+import { Lifecycle, PartCategory, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 import { resolveDisplayRevision } from '../lib/plm';
 
 const router = Router();
@@ -40,7 +41,7 @@ interface CompareSideDto {
 }
 
 interface CompareNodeDto {
-  part: PartRefDto;
+  part: PartRefDto | typeof REDACTED;
   status: CompareStatus;
   changedFields: string[];
   left: CompareSideDto | null;
@@ -67,6 +68,15 @@ async function fetchLines(parentRevisionId: number) {
     orderBy: { findNumber: 'asc' },
     include: lineInclude,
   });
+}
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+function partAcl(user: AclUser): Prisma.PartWhereInput {
+  return aclFilter('PART', user) as Prisma.PartWhereInput;
 }
 
 function toPartRef(part: LineRow['childPart']): PartRefDto {
@@ -102,23 +112,28 @@ async function buildOneSided(
   status: 'ADDED' | 'REMOVED',
   ancestors: ReadonlySet<number>,
   depth: number,
-  counts: Record<CompareStatus, number>
+  counts: Record<CompareStatus, number>,
+  user: AclUser
 ): Promise<CompareNodeDto[]> {
   const lines = await fetchLines(parentRevisionId);
+  // Rule X4 — a hidden child keeps its row (the diff counts stay honest) and loses its
+  // identity, revision and subtree, exactly like the BOM tree.
+  const visible = await visibleIds('PART', lines.map((line) => line.childPartId), user);
   const nodes: CompareNodeDto[] = [];
   for (const line of lines) {
-    const resolved = resolveDisplayRevision(line.childPart.revisions);
-    const cycle = ancestors.has(line.childPartId);
+    const hidden = !visible.has(line.childPartId);
+    const resolved = hidden ? null : resolveDisplayRevision(line.childPart.revisions);
+    const cycle = !hidden && ancestors.has(line.childPartId);
     counts[status] += 1;
     let children: CompareNodeDto[] = [];
-    if (!cycle && resolved && depth < MAX_DEPTH) {
+    if (!hidden && !cycle && resolved && depth < MAX_DEPTH) {
       const branch = new Set(ancestors);
       branch.add(line.childPartId);
-      children = await buildOneSided(resolved.id, side, status, branch, depth + 1, counts);
+      children = await buildOneSided(resolved.id, side, status, branch, depth + 1, counts, user);
     }
     const sideDto = toSide(line, resolved);
     nodes.push({
-      part: toPartRef(line.childPart),
+      part: hidden ? { ...REDACTED } : toPartRef(line.childPart),
       status,
       changedFields: [],
       left: side === 'left' ? sideDto : null,
@@ -136,25 +151,32 @@ async function buildCompareLevel(
   rightRevisionId: number,
   ancestors: ReadonlySet<number>,
   depth: number,
-  counts: Record<CompareStatus, number>
+  counts: Record<CompareStatus, number>,
+  user: AclUser
 ): Promise<CompareNodeDto[]> {
   const [leftLines, rightLines] = await Promise.all([
     fetchLines(leftRevisionId),
     fetchLines(rightRevisionId),
   ]);
+  const visible = await visibleIds(
+    'PART',
+    [...leftLines, ...rightLines].map((line) => line.childPartId),
+    user
+  );
   const rightByPart = new Map(rightLines.map((line) => [line.childPartId, line]));
   const nodes: CompareNodeDto[] = [];
 
   for (const leftLine of leftLines) {
+    const hidden = !visible.has(leftLine.childPartId);
     const rightLine = rightByPart.get(leftLine.childPartId);
-    const leftResolved = resolveDisplayRevision(leftLine.childPart.revisions);
-    const cycle = ancestors.has(leftLine.childPartId);
+    const leftResolved = hidden ? null : resolveDisplayRevision(leftLine.childPart.revisions);
+    const cycle = !hidden && ancestors.has(leftLine.childPartId);
 
     if (!rightLine) {
       // REMOVED — expand the left subtree one-sided.
       counts.REMOVED += 1;
       let children: CompareNodeDto[] = [];
-      if (!cycle && leftResolved && depth < MAX_DEPTH) {
+      if (!hidden && !cycle && leftResolved && depth < MAX_DEPTH) {
         const branch = new Set(ancestors);
         branch.add(leftLine.childPartId);
         children = await buildOneSided(
@@ -163,11 +185,12 @@ async function buildCompareLevel(
           'REMOVED',
           branch,
           depth + 1,
-          counts
+          counts,
+          user
         );
       }
       nodes.push({
-        part: toPartRef(leftLine.childPart),
+        part: hidden ? { ...REDACTED } : toPartRef(leftLine.childPart),
         status: 'REMOVED',
         changedFields: [],
         left: toSide(leftLine, leftResolved),
@@ -179,7 +202,7 @@ async function buildCompareLevel(
     }
 
     rightByPart.delete(leftLine.childPartId);
-    const rightResolved = resolveDisplayRevision(rightLine.childPart.revisions);
+    const rightResolved = hidden ? null : resolveDisplayRevision(rightLine.childPart.revisions);
 
     const changedFields: string[] = [];
     if (leftLine.quantity !== rightLine.quantity) changedFields.push('quantity');
@@ -194,7 +217,7 @@ async function buildCompareLevel(
     counts[status] += 1;
 
     let children: CompareNodeDto[] = [];
-    if (!cycle && depth < MAX_DEPTH) {
+    if (!hidden && !cycle && depth < MAX_DEPTH) {
       const branch = new Set(ancestors);
       branch.add(leftLine.childPartId);
       if (leftResolved && rightResolved) {
@@ -203,17 +226,18 @@ async function buildCompareLevel(
           rightResolved.id,
           branch,
           depth + 1,
-          counts
+          counts,
+          user
         );
       } else if (leftResolved) {
-        children = await buildOneSided(leftResolved.id, 'left', 'REMOVED', branch, depth + 1, counts);
+        children = await buildOneSided(leftResolved.id, 'left', 'REMOVED', branch, depth + 1, counts, user);
       } else if (rightResolved) {
-        children = await buildOneSided(rightResolved.id, 'right', 'ADDED', branch, depth + 1, counts);
+        children = await buildOneSided(rightResolved.id, 'right', 'ADDED', branch, depth + 1, counts, user);
       }
     }
 
     nodes.push({
-      part: toPartRef(leftLine.childPart),
+      part: hidden ? { ...REDACTED } : toPartRef(leftLine.childPart),
       status,
       changedFields,
       left: toSide(leftLine, leftResolved),
@@ -225,17 +249,18 @@ async function buildCompareLevel(
 
   // Remaining right lines are ADDED.
   for (const rightLine of rightByPart.values()) {
-    const rightResolved = resolveDisplayRevision(rightLine.childPart.revisions);
-    const cycle = ancestors.has(rightLine.childPartId);
+    const hidden = !visible.has(rightLine.childPartId);
+    const rightResolved = hidden ? null : resolveDisplayRevision(rightLine.childPart.revisions);
+    const cycle = !hidden && ancestors.has(rightLine.childPartId);
     counts.ADDED += 1;
     let children: CompareNodeDto[] = [];
-    if (!cycle && rightResolved && depth < MAX_DEPTH) {
+    if (!hidden && !cycle && rightResolved && depth < MAX_DEPTH) {
       const branch = new Set(ancestors);
       branch.add(rightLine.childPartId);
-      children = await buildOneSided(rightResolved.id, 'right', 'ADDED', branch, depth + 1, counts);
+      children = await buildOneSided(rightResolved.id, 'right', 'ADDED', branch, depth + 1, counts, user);
     }
     nodes.push({
-      part: toPartRef(rightLine.childPart),
+      part: hidden ? { ...REDACTED } : toPartRef(rightLine.childPart),
       status: 'ADDED',
       changedFields: [],
       left: null,
@@ -261,10 +286,12 @@ router.get(
       throw new HttpError(400, 'left and right revision ids are required');
     }
 
+    const user = aclUser(req);
+    // Both sides resolved through the part filter: a restricted root 404s like a missing one.
     const [leftRev, rightRev] = await Promise.all(
       [left, right].map((id) =>
-        prisma.partRevision.findUnique({
-          where: { id },
+        prisma.partRevision.findFirst({
+          where: { id, part: partAcl(user) },
           include: { part: true },
         })
       )
@@ -284,7 +311,8 @@ router.get(
       rightRev.id,
       new Set([leftRev.partId, rightRev.partId]),
       1,
-      counts
+      counts,
+      user
     );
 
     const toEnd = (rev: typeof leftRev) => ({

@@ -47,10 +47,15 @@ import {
   LIFECYCLE_META,
 } from '../components/meta';
 import BomTab from '../components/part/BomTab';
+import SignaturePanel from '../components/SignaturePanel';
+import CbomTab from '../components/part/CbomTab';
 import WhereUsedTab from '../components/part/WhereUsedTab';
 import ProcessTab from '../components/part/ProcessTab';
 import OptionsTab from '../components/part/OptionsTab';
 import SourcingTab from '../components/part/SourcingTab';
+import MaterialsTab from '../components/part/MaterialsTab';
+import MaterialRequirementsCard from '../components/part/MaterialRequirementsCard';
+import ItemAccessCard from '../components/ItemAccessCard';
 import CostTab from '../components/part/CostTab';
 import RequirementsTab from '../components/part/RequirementsTab';
 import AttributesPanel from '../components/part/AttributesPanel';
@@ -145,9 +150,14 @@ export default function PartDetailPage() {
     setNoteDraft(revision?.changeNote ?? '');
   }, [revision?.id, revision?.changeNote]);
 
+  // A BOM or attribute edit changes what a signer signed, so every refresh has to make the
+  // signature panel re-read its manifest — that read is what voids stale signatures.
+  const [signatureKey, setSignatureKey] = useState(0);
+
   const handleChanged = useCallback(() => {
     void refetchRevision();
     void fetchPart();
+    setSignatureKey((key) => key + 1);
   }, [refetchRevision, fetchPart]);
 
   // ---- helpers ------------------------------------------------------------
@@ -530,6 +540,16 @@ export default function PartDetailPage() {
 
         <Spin spinning={revisionLoading}>
           {revision ? (
+            <>
+            <SignaturePanel
+              entityType="REVISION"
+              entityId={revision.id}
+              refreshKey={signatureKey}
+              onSigned={handleChanged}
+            />
+
+            <ItemAccessCard entityType="PART" entityId={part.id} />
+
             <Tabs
               defaultActiveKey="overview"
               destroyInactiveTabPane
@@ -602,8 +622,13 @@ export default function PartDetailPage() {
                     ]
                   : []),
                 {
+                  key: 'cbom',
+                  label: 'cBOM',
+                  children: <CbomTab revision={revision} />,
+                },
+                {
                   key: 'bom',
-                  label: 'Bill of Materials',
+                  label: 'eBOM',
                   children: (
                     <BomTab
                       revision={revision}
@@ -619,14 +644,22 @@ export default function PartDetailPage() {
                 },
                 {
                   key: 'process',
-                  label: 'Manufacturing',
+                  label: 'mBOM / Manufacturing',
                   children: (
-                    <ProcessTab
-                      revision={revision}
-                      editable={canEdit && revision.lifecycle === 'IN_WORK'}
-                      onChanged={handleChanged}
-                    />
+                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                      <ProcessTab
+                        revision={revision}
+                        editable={canEdit && revision.lifecycle === 'IN_WORK'}
+                        onChanged={handleChanged}
+                      />
+                      <MaterialRequirementsCard revisionId={revision.id} />
+                    </Space>
                   ),
+                },
+                {
+                  key: 'materials',
+                  label: 'Materials',
+                  children: <MaterialsTab part={part} editable={canEdit} />,
                 },
                 {
                   key: 'options',
@@ -679,6 +712,7 @@ export default function PartDetailPage() {
                 },
               ]}
             />
+            </>
           ) : (
             <Skeleton active />
           )}

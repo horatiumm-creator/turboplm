@@ -6,7 +6,12 @@
   "scripts": {
     "build": "tsc",
     "generate": "prisma generate",
-    "create-admin": "node dist/create-admin.js"
+    "create-admin": "node dist/create-admin.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:db:setup": "node scripts/setup-test-db.js",
+    "test:ci": "npm run test:db:setup && vitest run"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -28,6 +33,9 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.14.0",
-    "typescript": "^5.6.3"
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.2.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

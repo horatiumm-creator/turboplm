@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -15,6 +15,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from 'antd';
@@ -25,10 +26,15 @@ import {
   DisconnectOutlined,
   DownloadOutlined,
   EditOutlined,
+  ImportOutlined,
+  KeyOutlined,
+  LockOutlined,
+  UnlockOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
+import ItemAccessCard from '../components/ItemAccessCard';
 import { useAuth } from '../auth/AuthContext';
 import type {
   DocumentCategory,
@@ -36,10 +42,17 @@ import type {
   DocumentLinkDetail,
   DocumentVersionDetail,
 } from '../api/types';
-import { DOC_CATEGORY_OPTIONS, DocCategoryTag, formatBytes, formatDate } from '../components/meta';
-import { isPreviewable } from '../components/cad/preview';
-
-const CadViewer = lazy(() => import('../components/cad/CadViewer'));
+import {
+  ConversionStatusTag,
+  DOC_CATEGORY_OPTIONS,
+  DocCategoryTag,
+  DocumentLockTag,
+  formatBytes,
+  formatDate,
+  lockReason,
+} from '../components/meta';
+import { isConvertible } from '../components/cad/preview';
+import DocumentMarkupPanel from '../components/DocumentMarkupPanel';
 
 interface EditFormValues {
   title: string;
@@ -50,6 +63,14 @@ interface EditFormValues {
 interface VersionFormValues {
   file?: UploadFile[];
   note?: string;
+}
+
+interface CheckoutFormValues {
+  note?: string;
+}
+
+interface BreakLockFormValues {
+  reason: string;
 }
 
 const normFile = (e: { fileList: UploadFile[] }) => e?.fileList;
@@ -80,11 +101,29 @@ export default function DocumentDetail() {
   const [editSaving, setEditSaving] = useState(false);
   const [editForm] = Form.useForm<EditFormValues>();
 
+  // CAD derivative re-conversion
+  const [converting, setConverting] = useState(false);
+
   // New version modal
   const [versionOpen, setVersionOpen] = useState(false);
   const [versionError, setVersionError] = useState<string | null>(null);
   const [versionSaving, setVersionSaving] = useState(false);
   const [versionForm] = Form.useForm<VersionFormValues>();
+
+  // Vault: check-out, check-in, cancel, break-lock (rules D1-D3)
+  const [lockBusy, setLockBusy] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutSaving, setCheckoutSaving] = useState(false);
+  const [checkoutForm] = Form.useForm<CheckoutFormValues>();
+  const [checkinOpen, setCheckinOpen] = useState(false);
+  const [checkinError, setCheckinError] = useState<string | null>(null);
+  const [checkinSaving, setCheckinSaving] = useState(false);
+  const [checkinForm] = Form.useForm<VersionFormValues>();
+  const [breakOpen, setBreakOpen] = useState(false);
+  const [breakError, setBreakError] = useState<string | null>(null);
+  const [breakSaving, setBreakSaving] = useState(false);
+  const [breakForm] = Form.useForm<BreakLockFormValues>();
 
   const load = useCallback(async () => {
     if (!Number.isInteger(docId) || docId <= 0) {
@@ -130,6 +169,15 @@ export default function DocumentDetail() {
     void load();
   }, [load]);
 
+  // Conversion runs out-of-process after the upload responds, so poll while any
+  // version is still PENDING and stop as soon as they all settle.
+  const pendingConversion = doc?.versions.some((v) => v.conversionStatus === 'PENDING') ?? false;
+  useEffect(() => {
+    if (!pendingConversion) return;
+    const timer = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(timer);
+  }, [pendingConversion, load]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 120 }}>
@@ -153,6 +201,39 @@ export default function DocumentDetail() {
     user !== null &&
     user.role !== 'VIEWER' &&
     (user.role === 'ADMIN' || user.id === doc.createdBy.id);
+
+  // Rule D1/D2 — the vault. `isMine` outranks expiry everywhere a write is gated: the server
+  // keys check-in and upload on whom the row names, and an expired lock only means somebody
+  // else *may* take it. Expiry does open the lock up, so it also decides who may check out.
+  const lock = doc.lock;
+  const lockIsMine = lock !== null && lock.isMine;
+  const lockTakeable = lock === null || lock.expired;
+  const heldByOther = lock !== null && !lock.isMine && !lock.expired;
+  /** Non-null exactly when the version upload would be refused, and says why (rule D3). */
+  const uploadBlocked = lockReason(lock, doc.docNumber);
+
+  const convertVersion = async (versionId: number) => {
+    setConverting(true);
+    try {
+      const updated = await api.convertDocumentVersion(versionId);
+      setDoc((prev) =>
+        prev
+          ? {
+              ...prev,
+              versions: prev.versions.map((v) => (v.id === updated.id ? updated : v)),
+              latestVersion:
+                prev.latestVersion?.id === updated.id ? updated : prev.latestVersion,
+            }
+          : prev
+      );
+      if (updated.conversionStatus === 'DONE') message.success('Derivative generated');
+      else message.warning(updated.conversionError ?? 'Conversion did not produce geometry');
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setConverting(false);
+    }
+  };
 
   const openEdit = () => {
     setEditError(null);
@@ -239,6 +320,132 @@ export default function DocumentDetail() {
     }
   };
 
+  // ---- vault (rules D1-D3) -------------------------------------------------
+
+  const openCheckout = () => {
+    setCheckoutError(null);
+    checkoutForm.resetFields();
+    setCheckoutOpen(true);
+  };
+
+  const saveCheckout = async () => {
+    let values: CheckoutFormValues;
+    try {
+      values = await checkoutForm.validateFields();
+    } catch {
+      return;
+    }
+    setCheckoutSaving(true);
+    setCheckoutError(null);
+    // Taken before the call: once it returns, the lock names the caller, so the only place the
+    // previous holder is still known is the state we are replacing. Rule D1 says taking an
+    // expired lock is never silent.
+    const previous = doc.lock;
+    try {
+      const updated = await api.checkoutDocument(doc.id, values.note?.trim() || undefined);
+      setDoc(updated);
+      setCheckoutOpen(false);
+      if (previous && !previous.isMine) {
+        message.warning(`Took over ${previous.user.name}'s expired check-out of ${updated.docNumber}`);
+      } else {
+        message.success(`${updated.docNumber} checked out`);
+      }
+    } catch (err) {
+      setCheckoutError(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setCheckoutSaving(false);
+    }
+  };
+
+  const cancelCheckout = () => {
+    modal.confirm({
+      title: 'Cancel check-out',
+      content: `Release the lock on ${doc.docNumber} without producing a version? Anything edited outside the vault is not recorded.`,
+      okText: 'Cancel check-out',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setLockBusy(true);
+        try {
+          const updated = await api.cancelDocumentCheckout(doc.id);
+          setDoc(updated);
+          message.success(`${updated.docNumber} released`);
+        } catch (err) {
+          // "not checked out by you", "changed concurrently" — the server's wording explains
+          // itself, and the reload below pulls the bar back in sync.
+          modal.error({
+            title: 'Could not cancel the check-out',
+            content: err instanceof ApiError ? err.message : 'Something went wrong',
+          });
+          await load();
+        } finally {
+          setLockBusy(false);
+        }
+      },
+    });
+  };
+
+  const openCheckin = () => {
+    setCheckinError(null);
+    checkinForm.resetFields();
+    setCheckinOpen(true);
+  };
+
+  const saveCheckin = async () => {
+    let values: VersionFormValues;
+    try {
+      values = await checkinForm.validateFields();
+    } catch {
+      return;
+    }
+    const file = values.file?.[0]?.originFileObj;
+    if (!file) {
+      setCheckinError('Choose a file to check in');
+      return;
+    }
+    setCheckinSaving(true);
+    setCheckinError(null);
+    try {
+      const updated = await api.checkinDocument(doc.id, file, values.note?.trim() || undefined);
+      setDoc(updated);
+      setCheckinOpen(false);
+      message.success(`${updated.docNumber} checked in as v${updated.latestVersion?.version ?? '?'}`);
+    } catch (err) {
+      setCheckinError(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setCheckinSaving(false);
+    }
+  };
+
+  const openBreakLock = () => {
+    setBreakError(null);
+    breakForm.resetFields();
+    setBreakOpen(true);
+  };
+
+  const saveBreakLock = async () => {
+    let values: BreakLockFormValues;
+    try {
+      values = await breakForm.validateFields();
+    } catch {
+      return;
+    }
+    setBreakSaving(true);
+    setBreakError(null);
+    const previous = doc.lock;
+    try {
+      const updated = await api.breakDocumentLock(doc.id, values.reason.trim());
+      setDoc(updated);
+      setBreakOpen(false);
+      message.success(
+        previous ? `${previous.user.name}'s lock was broken` : 'The lock was released'
+      );
+    } catch (err) {
+      setBreakError(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setBreakSaving(false);
+    }
+  };
+
   const removeLink = (link: DocumentLinkDetail) => {
     modal.confirm({
       title: 'Remove link',
@@ -283,6 +490,13 @@ export default function DocumentDetail() {
       width: 100,
       align: 'right',
       render: (_, v) => formatBytes(v.sizeBytes),
+    },
+    {
+      title: 'CAD',
+      key: 'conversion',
+      width: 160,
+      render: (_, v) =>
+        isConvertible(v.fileName) ? <ConversionStatusTag status={v.conversionStatus} /> : '—',
     },
     {
       title: 'Note',
@@ -409,9 +623,82 @@ export default function DocumentDetail() {
         </Descriptions>
       </Card>
 
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Space size={12} wrap>
+            <DocumentLockTag lock={lock} />
+            <Typography.Text type="secondary">
+              {lock === null
+                ? 'Nobody holds this document — check it out to reserve the next version.'
+                : lock.isMine
+                  ? `You checked it out ${formatDate(lock.lockedAt)}${
+                      lock.expiresAt
+                        ? `${lock.expired ? ', lapsed ' : ', expires '}${formatDate(lock.expiresAt)}`
+                        : ''
+                    }.`
+                  : `Checked out by ${lock.user.name} since ${formatDate(lock.lockedAt)}${
+                      lock.expired ? ' — the lock has lapsed, so anyone may take it' : ''
+                    }.`}
+            </Typography.Text>
+            {lock?.note && (
+              <Typography.Text italic type="secondary">
+                “{lock.note}”
+              </Typography.Text>
+            )}
+          </Space>
+          <Space wrap>
+            {canEdit && lockIsMine && (
+              <Button type="primary" icon={<ImportOutlined />} onClick={openCheckin}>
+                Check in
+              </Button>
+            )}
+            {canEdit && lockTakeable && (
+              <Button
+                type={lockIsMine ? 'default' : 'primary'}
+                icon={<LockOutlined />}
+                onClick={openCheckout}
+              >
+                {lockIsMine ? 'Refresh check-out' : 'Check out'}
+              </Button>
+            )}
+            {canEdit && lockIsMine && (
+              <Button icon={<UnlockOutlined />} loading={lockBusy} onClick={cancelCheckout}>
+                Cancel check-out
+              </Button>
+            )}
+            {heldByOther && user?.role === 'ADMIN' && (
+              <Button danger icon={<KeyOutlined />} onClick={openBreakLock}>
+                Break lock
+              </Button>
+            )}
+            {heldByOther && user?.role !== 'ADMIN' && (
+              <Typography.Text type="secondary">
+                An administrator can break the lock if it is blocking you.
+              </Typography.Text>
+            )}
+          </Space>
+        </div>
+        {!canEdit && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginTop: 12 }}
+            message="Read-only access — a Viewer can read the vault state but not check documents out."
+          />
+        )}
+      </Card>
+
       {previewVersion && (
         <Card
-          title="Preview"
+          title="Preview & design review"
           style={{ marginBottom: 16 }}
           extra={
             doc.versions.length > 1 && (
@@ -428,28 +715,45 @@ export default function DocumentDetail() {
             )
           }
         >
-          {isPreviewable(previewVersion.fileName) ? (
-            <Suspense
-              fallback={
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
-                  <Spin tip="Loading viewer…" />
-                </div>
-              }
-            >
-              <CadViewer
-                key={previewVersion.id}
-                fileUrl={api.documentVersionFileUrl(previewVersion.id, true)}
-                fileName={previewVersion.fileName}
-                height={480}
-              />
-            </Suspense>
-          ) : (
-            <Typography.Text type="secondary">
-              No preview for {previewVersion.fileName} — supported: STEP, IGES, BREP, STL,
-              glTF/GLB, OBJ, 3MF, PDF and images. Export a neutral format (e.g. STEP) from
-              CATIA / SolidWorks / NX to preview it here.
-            </Typography.Text>
+          {isConvertible(previewVersion.fileName) && (
+            <Space wrap size={12} style={{ marginBottom: 12 }}>
+              <ConversionStatusTag status={previewVersion.conversionStatus} />
+              {previewVersion.triangleCount !== null && (
+                <Typography.Text type="secondary">
+                  {previewVersion.triangleCount.toLocaleString()} triangles
+                </Typography.Text>
+              )}
+              {previewVersion.boundingBox && (
+                <Typography.Text type="secondary">
+                  {previewVersion.boundingBox.size.map((n) => n.toFixed(1)).join(' × ')} mm
+                </Typography.Text>
+              )}
+              {previewVersion.conversionError && (
+                <Typography.Text type="danger">{previewVersion.conversionError}</Typography.Text>
+              )}
+              {canEdit &&
+                (previewVersion.conversionStatus === 'SKIPPED' ||
+                  previewVersion.conversionStatus === 'FAILED') && (
+                  <Button
+                    size="small"
+                    loading={converting}
+                    onClick={() => void convertVersion(previewVersion.id)}
+                  >
+                    Convert now
+                  </Button>
+                )}
+            </Space>
           )}
+          {/*
+            The viewer is composed inside the markup panel (rule K4) rather than rendered here:
+            two viewers on one page would download the same geometry twice, and the overlay has
+            to sit on the element that actually renders it.
+          */}
+          <DocumentMarkupPanel
+            key={previewVersion.id}
+            version={previewVersion}
+            readOnly={!canEdit}
+          />
         </Card>
       )}
 
@@ -458,9 +762,29 @@ export default function DocumentDetail() {
         style={{ marginBottom: 16 }}
         extra={
           canEdit && (
-            <Button icon={<UploadOutlined />} onClick={openVersion}>
-              Upload new version
-            </Button>
+            <Space>
+              {/*
+                Rule D3 — the control is disabled with the reason in a tooltip rather than
+                letting the user pick a file and then fail on the 409.
+              */}
+              <Tooltip title={uploadBlocked ?? ''}>
+                {/* A disabled antd Button swallows mouse events, so the span carries the hover. */}
+                <span>
+                  <Button
+                    icon={<UploadOutlined />}
+                    disabled={uploadBlocked !== null}
+                    onClick={openVersion}
+                  >
+                    Upload new version
+                  </Button>
+                </span>
+              </Tooltip>
+              {lockIsMine && (
+                <Button icon={<ImportOutlined />} onClick={openCheckin}>
+                  Check in
+                </Button>
+              )}
+            </Space>
           )
         }
       >
@@ -554,6 +878,99 @@ export default function DocumentDetail() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title={lockIsMine ? 'Refresh your check-out' : `Check out ${doc.docNumber}`}
+        open={checkoutOpen}
+        onOk={() => void saveCheckout()}
+        okText={lockIsMine ? 'Refresh' : 'Check out'}
+        confirmLoading={checkoutSaving}
+        onCancel={() => setCheckoutOpen(false)}
+        forceRender
+      >
+        {checkoutError && (
+          <Alert type="error" showIcon message={checkoutError} style={{ marginBottom: 16 }} />
+        )}
+        <Typography.Paragraph type="secondary">
+          A check-out reserves the right to produce the next version. It lapses after seven days,
+          after which anyone may take it.
+        </Typography.Paragraph>
+        <Form form={checkoutForm} layout="vertical">
+          <Form.Item name="note" label="Note" tooltip="Tells colleagues what you are editing">
+            <Input.TextArea rows={2} placeholder="Reworking the mounting holes (optional)" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`Check in ${doc.docNumber}`}
+        open={checkinOpen}
+        onOk={() => void saveCheckin()}
+        okText="Check in"
+        confirmLoading={checkinSaving}
+        onCancel={() => setCheckinOpen(false)}
+        forceRender
+      >
+        {checkinError && (
+          <Alert type="error" showIcon message={checkinError} style={{ marginBottom: 16 }} />
+        )}
+        <Typography.Paragraph type="secondary">
+          The file becomes v{(doc.latestVersion?.version ?? 0) + 1} and the lock is released in the
+          same transaction.
+        </Typography.Paragraph>
+        <Form form={checkinForm} layout="vertical">
+          <Form.Item
+            name="file"
+            label="File"
+            valuePropName="fileList"
+            getValueFromEvent={normFile}
+            rules={[{ required: true, message: 'Choose a file' }]}
+          >
+            <Upload beforeUpload={() => false} maxCount={1}>
+              <Button icon={<UploadOutlined />}>Choose file</Button>
+            </Upload>
+          </Form.Item>
+          <Form.Item name="note" label="Version note">
+            <Input.TextArea rows={2} placeholder="What changed in this version? (optional)" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Break the lock"
+        open={breakOpen}
+        onOk={() => void saveBreakLock()}
+        okText="Break lock"
+        okButtonProps={{ danger: true }}
+        confirmLoading={breakSaving}
+        onCancel={() => setBreakOpen(false)}
+        forceRender
+      >
+        {breakError && (
+          <Alert type="error" showIcon message={breakError} style={{ marginBottom: 16 }} />
+        )}
+        <Typography.Paragraph type="secondary">
+          {lock
+            ? `${lock.user.name} is holding ${doc.docNumber}. Breaking the lock notifies them and the reason is kept with the document.`
+            : 'The document is not locked.'}
+        </Typography.Paragraph>
+        <Form form={breakForm} layout="vertical">
+          <Form.Item
+            name="reason"
+            label="Reason"
+            rules={[
+              { required: true, message: 'A reason is required — the audit trail must explain itself' },
+              { max: 1000, message: 'At most 1000 characters' },
+            ]}
+          >
+            <Input.TextArea rows={3} placeholder="Why the lock has to go" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <div style={{ marginTop: 16 }}>
+        <ItemAccessCard entityType="DOCUMENT" entityId={doc.id} />
+      </div>
     </div>
   );
 }

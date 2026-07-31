@@ -3,3 +3,6 @@ media/out/
 node_modules/
 dist/
 .env
+
+# Runtime upload store — the seed regenerates its sample drawings on boot
+backend/uploads/

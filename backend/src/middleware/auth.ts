@@ -63,7 +63,10 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = (req.cookies as Record<string, string> | undefined)?.[COOKIE_NAME];
     if (!token) throw new HttpError(401, 'Not authenticated');
-    const payload = jwt.verify(token, JWT_SECRET) as { sub?: string };
+    const payload = jwt.verify(token, JWT_SECRET) as { sub?: string; kind?: string };
+    // A supplier-portal token is signed with the same secret, so the kind claim is what
+    // keeps an external account out of the internal API (rule P1).
+    if (payload.kind) throw new HttpError(401, 'Not authenticated');
     const userId = Number(payload.sub);
     if (!Number.isInteger(userId)) throw new HttpError(401, 'Not authenticated');
     const user = await prisma.user.findUnique({ where: { id: userId } });

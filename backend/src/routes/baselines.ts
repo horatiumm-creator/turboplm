@@ -3,6 +3,7 @@ import { Lifecycle, PartCategory, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 import { resolveDisplayRevision } from '../lib/plm';
 
 const router = Router();
@@ -45,7 +46,7 @@ interface BaselineSummaryDto {
 }
 
 interface BaselineLineNodeDto {
-  part: PartRefDto;
+  part: PartRefDto | typeof REDACTED;
   revisionLabel: string;
   findNumber: number;
   quantity: number;
@@ -72,7 +73,7 @@ interface CompareSideDto {
 }
 
 interface CompareNodeDto {
-  part: PartRefDto;
+  part: PartRefDto | typeof REDACTED;
   status: CompareStatus;
   changedFields: string[];
   left: CompareSideDto | null;
@@ -140,19 +141,27 @@ function groupByParent(lines: BaselineLineRow[]): Map<number | null, BaselineLin
   return byParent;
 }
 
+/**
+ * Rule X4 — a snapshot line whose part the caller may not read keeps its slot (find number,
+ * quantity) and loses identity, revision label and subtree, matching the live BOM tree.
+ */
 function buildNodes(
   byParent: Map<number | null, BaselineLineRow[]>,
-  parentLineId: number | null
+  parentLineId: number | null,
+  visible: ReadonlySet<number>
 ): BaselineLineNodeDto[] {
-  return (byParent.get(parentLineId) ?? []).map((line) => ({
-    part: toPartRef(line.part),
-    revisionLabel: line.revisionLabel,
-    findNumber: line.findNumber,
-    quantity: line.quantity,
-    uom: line.uom,
-    refDesignators: line.refDesignators,
-    children: buildNodes(byParent, line.id),
-  }));
+  return (byParent.get(parentLineId) ?? []).map((line) => {
+    const hidden = !visible.has(line.partId);
+    return {
+      part: hidden ? { ...REDACTED } : toPartRef(line.part),
+      revisionLabel: hidden ? REDACTED.name : line.revisionLabel,
+      findNumber: line.findNumber,
+      quantity: line.quantity,
+      uom: line.uom,
+      refDesignators: line.refDesignators,
+      children: hidden ? [] : buildNodes(byParent, line.id, visible),
+    };
+  });
 }
 
 async function fetchBaselineLines(baselineId: number): Promise<BaselineLineRow[]> {
@@ -163,11 +172,29 @@ async function fetchBaselineLines(baselineId: number): Promise<BaselineLineRow[]
   });
 }
 
-async function getBaselineDetailOrThrow(id: number): Promise<BaselineDetailDto> {
-  const row = await prisma.baseline.findUnique({ where: { id }, include: baselineSummaryInclude });
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+function partAcl(user: AclUser): Prisma.PartWhereInput {
+  return aclFilter('PART', user) as Prisma.PartWhereInput;
+}
+
+/** A baseline is as visible as the part whose structure it froze (rule X2). */
+function visibleBaseline(user: AclUser): Prisma.BaselineWhereInput {
+  return { partRevision: { part: partAcl(user) } };
+}
+
+async function getBaselineDetailOrThrow(id: number, user: AclUser): Promise<BaselineDetailDto> {
+  const row = await prisma.baseline.findFirst({
+    where: { id, ...visibleBaseline(user) },
+    include: baselineSummaryInclude,
+  });
   if (!row) throw new HttpError(404, 'Baseline not found');
   const lines = await fetchBaselineLines(id);
-  return { ...toBaselineSummary(row), nodes: buildNodes(groupByParent(lines), null) };
+  const visible = await visibleIds('PART', lines.map((line) => line.partId), user);
+  return { ...toBaselineSummary(row), nodes: buildNodes(groupByParent(lines), null, visible) };
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +303,7 @@ router.get(
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
 
-    const where: Prisma.BaselineWhereInput = {};
+    const where: Prisma.BaselineWhereInput = { ...visibleBaseline(aclUser(req)) };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -314,8 +341,8 @@ router.post(
     const description =
       body.description === undefined ? null : optionalNullableText(body.description, 'description');
 
-    const revision = await prisma.partRevision.findUnique({
-      where: { id: partRevisionId },
+    const revision = await prisma.partRevision.findFirst({
+      where: { id: partRevisionId, part: partAcl(aclUser(req)) },
       select: { id: true, partId: true },
     });
     if (!revision) throw new HttpError(404, 'Revision not found');
@@ -358,7 +385,7 @@ router.post(
       return baseline.id;
     });
 
-    res.status(201).json(await getBaselineDetailOrThrow(createdId));
+    res.status(201).json(await getBaselineDetailOrThrow(createdId, aclUser(req)));
   })
 );
 
@@ -369,7 +396,7 @@ router.post(
 router.get(
   '/baselines/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getBaselineDetailOrThrow(idParam(req.params.id)));
+    res.json(await getBaselineDetailOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -383,8 +410,8 @@ router.delete(
     const id = idParam(req.params.id);
     const user = currentUser(req);
 
-    const baseline = await prisma.baseline.findUnique({
-      where: { id },
+    const baseline = await prisma.baseline.findFirst({
+      where: { id, ...visibleBaseline(aclUser(req)) },
       select: { id: true, createdById: true },
     });
     if (!baseline) throw new HttpError(404, 'Baseline not found');
@@ -434,20 +461,22 @@ function buildOneSided(
   side: 'left' | 'right',
   status: 'ADDED' | 'REMOVED',
   ancestors: ReadonlySet<number>,
-  counts: Record<CompareStatus, number>
+  counts: Record<CompareStatus, number>,
+  visible: ReadonlySet<number>
 ): CompareNodeDto[] {
   return nodes.map((node) => {
-    const cycle = ancestors.has(node.line.partId);
+    const hidden = !visible.has(node.line.partId);
+    const cycle = !hidden && ancestors.has(node.line.partId);
     counts[status] += 1;
     let children: CompareNodeDto[] = [];
-    if (!cycle) {
+    if (!hidden && !cycle) {
       const branch = new Set(ancestors);
       branch.add(node.line.partId);
-      children = buildOneSided(node.children, side, status, branch, counts);
+      children = buildOneSided(node.children, side, status, branch, counts, visible);
     }
     const sideDto = toSide(node.line);
     return {
-      part: toPartRef(node.line.part),
+      part: hidden ? { ...REDACTED } : toPartRef(node.line.part),
       status,
       changedFields: [],
       left: side === 'left' ? sideDto : null,
@@ -463,27 +492,29 @@ function buildCompareLevel(
   leftNodes: StoredNode[],
   rightNodes: StoredNode[],
   ancestors: ReadonlySet<number>,
-  counts: Record<CompareStatus, number>
+  counts: Record<CompareStatus, number>,
+  visible: ReadonlySet<number>
 ): CompareNodeDto[] {
   const rightByPart = new Map(rightNodes.map((node) => [node.line.partId, node]));
   const nodes: CompareNodeDto[] = [];
 
   for (const leftNode of leftNodes) {
     const partId = leftNode.line.partId;
+    const hidden = !visible.has(partId);
     const rightNode = rightByPart.get(partId);
-    const cycle = ancestors.has(partId);
+    const cycle = !hidden && ancestors.has(partId);
 
     if (!rightNode) {
       // REMOVED — expand the left subtree one-sided.
       counts.REMOVED += 1;
       let children: CompareNodeDto[] = [];
-      if (!cycle) {
+      if (!hidden && !cycle) {
         const branch = new Set(ancestors);
         branch.add(partId);
-        children = buildOneSided(leftNode.children, 'left', 'REMOVED', branch, counts);
+        children = buildOneSided(leftNode.children, 'left', 'REMOVED', branch, counts, visible);
       }
       nodes.push({
-        part: toPartRef(leftNode.line.part),
+        part: hidden ? { ...REDACTED } : toPartRef(leftNode.line.part),
         status: 'REMOVED',
         changedFields: [],
         left: toSide(leftNode.line),
@@ -509,14 +540,14 @@ function buildCompareLevel(
     counts[status] += 1;
 
     let children: CompareNodeDto[] = [];
-    if (!cycle) {
+    if (!hidden && !cycle) {
       const branch = new Set(ancestors);
       branch.add(partId);
-      children = buildCompareLevel(leftNode.children, rightNode.children, branch, counts);
+      children = buildCompareLevel(leftNode.children, rightNode.children, branch, counts, visible);
     }
 
     nodes.push({
-      part: toPartRef(leftNode.line.part),
+      part: hidden ? { ...REDACTED } : toPartRef(leftNode.line.part),
       status,
       changedFields,
       left: toSide(leftNode.line),
@@ -528,16 +559,17 @@ function buildCompareLevel(
 
   // Remaining right nodes are ADDED.
   for (const rightNode of rightByPart.values()) {
-    const cycle = ancestors.has(rightNode.line.partId);
+    const hidden = !visible.has(rightNode.line.partId);
+    const cycle = !hidden && ancestors.has(rightNode.line.partId);
     counts.ADDED += 1;
     let children: CompareNodeDto[] = [];
-    if (!cycle) {
+    if (!hidden && !cycle) {
       const branch = new Set(ancestors);
       branch.add(rightNode.line.partId);
-      children = buildOneSided(rightNode.children, 'right', 'ADDED', branch, counts);
+      children = buildOneSided(rightNode.children, 'right', 'ADDED', branch, counts, visible);
     }
     nodes.push({
-      part: toPartRef(rightNode.line.part),
+      part: hidden ? { ...REDACTED } : toPartRef(rightNode.line.part),
       status: 'ADDED',
       changedFields: [],
       left: null,
@@ -559,9 +591,13 @@ router.get(
       throw new HttpError(400, 'left and right baseline ids are required');
     }
 
+    const user = aclUser(req);
     const [leftRow, rightRow] = await Promise.all(
       [left, right].map((id) =>
-        prisma.baseline.findUnique({ where: { id }, include: baselineSummaryInclude })
+        prisma.baseline.findFirst({
+          where: { id, ...visibleBaseline(user) },
+          include: baselineSummaryInclude,
+        })
       )
     );
     if (!leftRow) throw new HttpError(404, 'Left baseline not found');
@@ -571,6 +607,11 @@ router.get(
       fetchBaselineLines(leftRow.id),
       fetchBaselineLines(rightRow.id),
     ]);
+    const visible = await visibleIds(
+      'PART',
+      [...leftLines, ...rightLines].map((line) => line.partId),
+      user
+    );
     const leftTree = buildStoredTree(groupByParent(leftLines), null);
     const rightTree = buildStoredTree(groupByParent(rightLines), null);
 
@@ -585,7 +626,8 @@ router.get(
       leftTree,
       rightTree,
       new Set([leftRow.partRevision.partId, rightRow.partRevision.partId]),
-      counts
+      counts,
+      visible
     );
 
     res.json({

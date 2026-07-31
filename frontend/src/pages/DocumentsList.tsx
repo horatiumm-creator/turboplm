@@ -6,9 +6,23 @@ import { PlusOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import type { DocumentCategory, DocumentSummary } from '../api/types';
+import type { DocumentCategory, DocumentLock, DocumentSummary } from '../api/types';
 import { DocumentUploadModal, type DocumentUploadInput } from '../components/DocumentsCard';
-import { DOC_CATEGORY_OPTIONS, DocCategoryTag, formatBytes, formatDate } from '../components/meta';
+import {
+  DOC_CATEGORY_OPTIONS,
+  DocCategoryTag,
+  DocumentLockTag,
+  formatBytes,
+  formatDate,
+} from '../components/meta';
+
+/**
+ * Rule D3 wants a vault-wide lock column, and the list endpoint already carries the lock on
+ * every row so it costs no extra call. `DocumentSummary` in api/types.ts (frozen, not ours)
+ * stops at `latestVersion`, so the field is read through this local view instead — see the
+ * report: the type, not the wire, is what is missing it.
+ */
+type VaultDocumentSummary = DocumentSummary & { lock?: DocumentLock | null };
 
 export default function DocumentsList() {
   const { message } = AntdApp.useApp();
@@ -16,7 +30,7 @@ export default function DocumentsList() {
   const { user } = useAuth();
   const canEdit = user?.role !== 'VIEWER';
 
-  const [items, setItems] = useState<DocumentSummary[]>([]);
+  const [items, setItems] = useState<VaultDocumentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -60,7 +74,7 @@ export default function DocumentsList() {
     navigate(`/documents/${created.id}`);
   };
 
-  const columns: ColumnsType<DocumentSummary> = [
+  const columns: ColumnsType<VaultDocumentSummary> = [
     {
       title: 'Document #',
       key: 'docNumber',
@@ -73,6 +87,12 @@ export default function DocumentsList() {
       key: 'category',
       width: 140,
       render: (_, doc) => <DocCategoryTag category={doc.category} />,
+    },
+    {
+      title: 'Vault',
+      key: 'lock',
+      width: 180,
+      render: (_, doc) => <DocumentLockTag lock={doc.lock} />,
     },
     {
       title: 'Versions',
@@ -156,7 +176,7 @@ export default function DocumentsList() {
         />
       </Space>
 
-      <Table<DocumentSummary>
+      <Table<VaultDocumentSummary>
         size="middle"
         rowKey="id"
         columns={columns}

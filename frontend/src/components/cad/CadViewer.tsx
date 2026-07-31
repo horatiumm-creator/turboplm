@@ -16,6 +16,11 @@ interface CadViewerProps {
   fileUrl: string;
   fileName: string;
   height?: number;
+  /**
+   * Server-side glTF derivative. When present the viewer loads this instead of
+   * the source file, so heavy assemblies skip the in-browser CAD kernel.
+   */
+  glbUrl?: string;
 }
 
 async function loadOcctGroup(ext: string, buffer: ArrayBuffer): Promise<THREE.Group> {
@@ -101,7 +106,11 @@ async function loadModel(ext: string, fileUrl: string): Promise<THREE.Object3D> 
   throw new Error(`Unsupported model format: .${ext}`);
 }
 
-function Model3dViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
+function Model3dViewer({ fileUrl, fileName, height = 480, glbUrl }: CadViewerProps) {
+  // The derivative is already tessellated glTF, so load it directly.
+  const sourceUrl = glbUrl ?? fileUrl;
+  const sourceExt = glbUrl ? 'glb' : fileExtension(fileName);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +187,7 @@ function Model3dViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
 
     setLoading(true);
     setError(null);
-    void loadModel(fileExtension(fileName), fileUrl)
+    void loadModel(sourceExt, sourceUrl)
       .then((object) => {
         if (disposed) return;
         scene.add(object);
@@ -210,7 +219,7 @@ function Model3dViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [fileUrl, fileName, height]);
+  }, [sourceUrl, sourceExt, height]);
 
   const toggleWireframe = useCallback(() => {
     const next = !wireframe;
@@ -246,6 +255,7 @@ function Model3dViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
           Wireframe
         </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {glbUrl ? 'Converted derivative · ' : ''}
           Drag to rotate · scroll to zoom · right-drag to pan
         </Typography.Text>
       </Space>
@@ -260,7 +270,7 @@ function Model3dViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
   );
 }
 
-export default function CadViewer({ fileUrl, fileName, height = 480 }: CadViewerProps) {
+export default function CadViewer({ fileUrl, fileName, height = 480, glbUrl }: CadViewerProps) {
   const kind = previewKind(fileName);
 
   if (kind === 'pdf') {
@@ -283,8 +293,11 @@ export default function CadViewer({ fileUrl, fileName, height = 480 }: CadViewer
       </div>
     );
   }
-  if (kind === 'model3d') {
-    return <Model3dViewer fileUrl={fileUrl} fileName={fileName} height={height} />;
+  // A derivative means the source is 3D geometry even if `previewKind` was unsure.
+  if (kind === 'model3d' || glbUrl) {
+    return (
+      <Model3dViewer fileUrl={fileUrl} fileName={fileName} height={height} glbUrl={glbUrl} />
+    );
   }
   return (
     <Alert

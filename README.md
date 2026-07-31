@@ -51,9 +51,10 @@ quadcopter (27 parts, four BOM levels, released and in-work revisions, two proce
 plans) plus a **TurboDrone X1 Pro** variant that shares subassemblies — so BOM compare,
 where-used and change management have real data to work on immediately.
 
-> **Tip:** Register your own account from the login page if you'd rather start clean;
-> new self-registered users get the Engineer role. Set `ALLOW_REGISTRATION=false` to
-> turn that off.
+> **Tip:** Register your own account from the login page if you'd rather start clean.
+> New self-registered users get the **Viewer** (read-only) role by default — change that
+> with `REGISTRATION_ROLE=ENGINEER`, or set `ALLOW_REGISTRATION=false` to turn
+> self-registration off entirely.
 
 To stop, and to wipe everything including the database and uploaded files:
 
@@ -79,25 +80,58 @@ docker compose down -v       # stop and delete all data
   windows and alternates) and the process plan.
 - **Effectivity & alternates** — date-effective BOM lines with an "as of" filter, and
   substitute parts per line.
-- **Baselines** — freeze a full resolved structure as a named snapshot, and diff any two
-  baselines against each other.
+- **Baselines** — freeze a revision's resolved structure as a named snapshot, and diff any
+  two baselines against each other. A baseline captures BOM lines — not documents,
+  attributes or process plans — so it is a structure snapshot, not a release package.
 - **BOM compare** — align any two revisions (same part or different products) into one
   tree: Added / Removed / Changed / Unchanged per node, with the changed fields listed.
 - **Cost roll-up** — unit costs rolled through the multi-level BOM, flagging parts with
-  unknown cost.
+  unknown cost. Straight unit-cost arithmetic: no currency conversion, no labour/overhead
+  split, no quantity price breaks.
 - **Variants** — option groups and values per part, BOM lines conditional on selected
-  options, and a configurator that resolves a selection to a concrete structure.
+  options, and a configurator that resolves a selection to a concrete structure. Lines are
+  included by option value; there are no compatibility rules and no per-option pricing.
 - **Custom attributes** — admin-defined typed attributes (text/number/date/boolean/list)
-  per part category, validated server-side.
+  scoped to a part category and validated server-side. This is how parts are classified
+  beyond the built-in categories; values are entered on the part, and custom attributes
+  are not targets of the catalog importer.
+- **Materials** — a material master (class, form, density, unit cost) attached to parts
+  with a net quantity and a scrap factor, so a modelled volume becomes a purchasable mass.
+- **Material requirements** — gross demand rolled up across a revision's BOM
+  (*net × (1 + scrap)*, accumulated per material) with estimated cost, a list of parts
+  that declare no material at all, and CSV export. This is a demand calculation, not MRP:
+  nothing nets against on-hand stock, and nothing plans supply or lead times.
 
 ### Manufacturing
 - **Process plans (mBOM)** — per-revision routings: sequenced operations with work
   centers and setup/run times, each consuming materials.
-- **AML / sourcing** — manufacturers and manufacturer part numbers per part with
-  preferred / approved / alternate / obsolete status.
-- **Supplier RFQ** — suppliers, RFQ lines per part, quotes with lead time and MOQ,
-  automatic lowest-price flagging and extended pricing, and award tracking that closes
-  the RFQ once every line is awarded.
+- **mBOM from the eBOM** — seed a process plan's consumption straight from the engineering
+  BOM, then reconcile the two: every part is reported as matched, quantity-mismatched,
+  designed but never consumed, or consumed but never designed.
+
+### Traceability & service
+- **Build units** — record what was physically made as serial numbers or lots
+  (`SN-…` / `LOT-…`), each tied to a released revision and moved through a build status;
+  a shipped or scrapped unit is locked. You cannot build to an unreleased revision.
+- **As-built records** — log which child serials and lots were consumed into each unit. A
+  serial can be consumed by exactly one parent, a lot cannot be over-drawn, and structural
+  cycles are refused under a database advisory lock, so two people recording builds at the
+  same moment cannot both slip past the check.
+- **Genealogy** — walk backwards from a unit through everything inside it, level by level
+  (capped at 15 levels, and flagged when the walk is truncated).
+- **Where-consumed** — walk forwards from a suspect lot to every unit that contains it,
+  with the *shipped* units listed separately, which is the answer a recall actually needs.
+- **As-built deviations** — compare a unit against the BOM it was supposed to be built to:
+  match, quantity mismatch, missing, unplanned, or substituted — and an approved BOM
+  alternate is reported as a substitution rather than as a defect.
+- **Service records** — log repairs, upgrades, inspections, warranty claims and
+  decommissions against a shipped unit, and drive each record through to completion.
+  Record-keeping, not field service: no maintenance scheduling, dispatch, labour costing
+  or spares inventory.
+- **Part swaps & as-maintained** — record the unit removed and the unit fitted in its
+  place; committing a swap rewrites the as-built graph under the same lock, so genealogy
+  and service history can never disagree. A unit's as-maintained view then shows what is
+  installed today next to what originally shipped.
 
 ### Change management
 - **ECR intake** — engineering change requests raised against a part, then triaged:
@@ -117,25 +151,70 @@ docker compose down -v       # stop and delete all data
   into.
 - **Printable ECN notice** — a formal change document at `/ecns/:id/report` with items,
   dispositions, sign-offs and impact, ready to print to PDF.
-- **Quality (NCR/CAPA)** — nonconformances with severity, quantity, lot/serial and
-  disposition (*Open → Contained → Closed*; closing requires a disposition), one-click
+- **Quality (NCR/CAPA)** — nonconformances with severity, quantity, a link to the exact
+  build unit affected (or free-text lot/serial) and a disposition
+  (*Open → Contained → Closed*; closing requires a disposition), one-click
   escalation into a draft ECN, and CAPAs with root-cause / corrective / preventive
   records whose Verify and Close steps are gated on evidence and on linked NCRs.
 
 ### Documents & CAD
 - **Versioned documents** — `DOC-10001` records with file storage, categories, download,
-  and links to parts, revisions and ECNs.
+  and links to parts, revisions and ECNs. Files up to 50 MB each are kept on the server's
+  own filesystem — there is no object store, no CDN and no virus scanning.
+- **Vault check-out / check-in** — take a lock before you edit, so two engineers cannot
+  silently overwrite each other's work. A second simultaneous check-out is refused, and
+  check-in creates the new version and releases the lock in one transaction. Locks expire
+  after seven days (after which anyone may take them), and an admin can break a lock with
+  a recorded reason. This is a web vault: you download the file and upload its
+  replacement — there is no desktop client, CAD add-in or workspace sync.
+- **Design review markup** — pin a comment to a point or a box on a drawing image, or to a
+  3D location on a converted model, thread the discussion under it, resolve it, or
+  escalate it straight into a change request. PDFs take version-level notes rather than
+  positional pins. Markups stay anchored to the version they were raised on and
+  deliberately do not carry forward to the next upload.
 - **CAD viewer** — in-browser 3D preview: **STEP / IGES / BREP** via OpenCascade
   WebAssembly, plus STL, glTF/GLB, OBJ and 3MF via three.js (orbit, zoom, pan, fit,
   wireframe). PDFs and images preview inline.
 - **CAD conversion service** — a separate container runs the OpenCascade kernel
   out-of-process and tessellates uploaded STEP/IGES/BREP into a glTF derivative with
   triangle count and bounding box, so heavy assemblies open instantly.
+- **cBOM from CAD** — the same kernel returns the assembly structure, stored as a CAD BOM
+  on the document version. Diff it between two CAD versions, reconcile it against the
+  engineering BOM (added, removed, quantity changed), or import it — dry run first — to
+  build the eBOM, creating missing parts and walking sub-assemblies recursively.
+  Components are matched to the part catalog by name, so anything the kernel could not
+  name stays unmatched.
 
-> **Important:** native CATIA (`.CATPart`), SolidWorks (`.sldprt`) and NX (`.prt`) files
-> are proprietary formats that require vendor SDKs to decode. TurboPLM stores them
-> as documents, but previews need a neutral export (STEP is the usual choice) — the same
-> approach commercial PLM systems take under the hood.
+> **Important:** kernel work — derivative conversion and assembly-structure extraction —
+> happens on neutral formats only: STEP, IGES and BREP (mesh formats such as STL and glTF
+> render directly). Native CATIA (`.CATPart`), SolidWorks (`.sldprt`) and NX (`.prt`)
+> files are proprietary formats that require vendor SDKs to decode; TurboPLM stores them
+> as documents but cannot read inside them, and there is no plug-in that pushes data out
+> of a CAD seat. Export a neutral file and upload it — the same approach commercial PLM
+> systems take under the hood. Extraction is best-effort: if the conversion container is
+> down or the model is too slow to tessellate, the upload still succeeds and the version
+> is marked failed.
+
+### Sourcing & suppliers
+- **AML / sourcing** — manufacturers and manufacturer part numbers per part with
+  preferred / approved / alternate / obsolete status. A static approved-source list: no
+  live availability, pricing, lead time or end-of-life alerting.
+- **Supplier RFQ** — suppliers, RFQ lines per part, quotes with lead time and MOQ,
+  automatic lowest-price flagging and extended pricing, and award tracking that closes
+  the RFQ once every line is awarded. An award is a record, not a purchase order.
+- **Supplier portal** — invited suppliers sign in under `/portal` with accounts that are a
+  wholly separate identity from internal users, and see only the RFQs they were invited
+  to, where they submit and withdraw quotes. They cannot see competitors, competitors'
+  prices, your target price, parts, BOMs, documents or changes; an RFQ they were not
+  invited to answers "not found" rather than "forbidden", so its existence is not leaked.
+- **Vendor catalog import** — upload a distributor or manufacturer catalog as **CSV, TSV
+  or BMEcat XML**, map its columns onto part fields, validate row by row and fix bad rows
+  in place, then commit the good ones. Five vendor presets ship seeded and admins can save
+  reusable mappings. Excel workbooks are rejected. File-based import only: there is no
+  distributor API, pricing feed or scheduled sync.
+- **ERP exchange** — item master and BOM export as CSV or JSON, and bulk part / BOM-line
+  import from CSV with a dry-run validation mode. This is file exchange rather than a live
+  ERP connector — no middleware, no scheduled sync, no vendor adapter.
 
 ### Requirements & projects
 - **Requirements traceability** — `REQ-10001` items with typed statements, priority,
@@ -146,26 +225,57 @@ docker compose down -v       # stop and delete all data
   parts, documents, requirements or ECNs. A gate refuses to pass while an earlier gate is
   open or a required deliverable is outstanding.
 
-### Platform
-- **Auth** — app-managed registration and login (bcrypt + JWT in an httpOnly cookie),
-  plus optional Google sign-in that appears automatically once configured.
+### Access control & signatures
 - **RBAC** — Viewer (read-only), Engineer (edit), Admin (users, attributes, workflows,
-  integrations), enforced app-wide on the server and reflected in the UI.
-- **Audit trail** — every successful mutation logged with actor, path and sanitized
-  payload, on a filterable Activity page.
+  integrations), enforced app-wide on the server and reflected in the UI. Three global
+  roles, no custom ones.
+- **Item-level access** — grant an individual part, document, ECN, project or build unit
+  to named users or to access groups, with read or read-write permission. Enforcement sits
+  in one library used by every router: an item you may not read answers "not found" rather
+  than "forbidden", so its existence is not disclosed, and a restricted child inside a BOM
+  you *can* see is redacted to a **Restricted** placeholder instead of being dropped —
+  quantities and find numbers survive, so the structure in front of you is never quietly
+  falsified. Grants are opt-in per item; an item with no grants is governed by role alone,
+  and admins always pass.
+- **Electronic signatures** — Part 11-style signing: an admin defines who must sign — a
+  named person or a role — before an ECN can be approved or a part revision released.
+  Signing re-authenticates the signer — password re-entry, or, for an account that has no
+  password because it only ever signs in with Google, retyping its own address — and the
+  method used is recorded on the signature, so the strength of each one stays auditable.
+  (That second path is a weak factor: anyone already at the keyboard can satisfy it. Treat
+  password accounts as the ones that carry real signing weight until this is hardened.)
+  Signing stamps the printed name and role at the moment of signing, and binds the
+  signature to a hash of exactly what was signed, so editing the signed content voids the
+  signature and re-blocks the release. Signatures are
+  append-only and cannot be edited or deleted. Requirements are opt-in: configure none and
+  nothing is gated. These are Part 11-*informed* mechanics, not a validated or certified
+  installation.
+- **Audit trail** — successful mutations through the internal API logged with actor, path
+  and sanitized payload, on a filterable Activity page. Two caveats worth knowing: the
+  supplier-portal and auth routers mount ahead of the audit middleware, so supplier quote
+  writes are not captured; and the audit row is written after the response, best-effort, so
+  a failed insert loses the entry rather than failing the request.
+
+### Platform
+- **Auth** — app-managed registration and login (bcrypt + JWT in an httpOnly cookie), plus
+  optional Google sign-in that appears automatically once configured: the callback
+  compares a CSRF `state` cookie in constant time and refuses accounts whose Google
+  address is unverified. Google is the only federated provider.
 - **Notifications** — in-app bell with unread badge, plus optional email delivery over
   any SMTP relay (Microsoft 365 documented). Email uses the notification table as an
   outbox, so mail can never delay or roll back a PLM operation.
 - **My Work inbox** — approval tasks waiting on you, your in-work revisions, your open
   change requests and active ECNs, in one queue.
 - **Global search** — header omnibox across parts, documents, ECNs, ECRs, requirements
-  and manufacturers.
-- **Integration** — API keys with read/write scopes, HMAC-signed webhooks with delivery
-  history, ERP-shaped item/BOM export (CSV + JSON) and CSV import with a dry-run
-  validation mode.
-- **Analytics** — KPIs for change cycle time, BOM health, requirement coverage and top
-  cost drivers.
-- **Exports** — multi-level BOM to CSV from any revision.
+  and manufacturers. It matches record metadata — numbers, titles, statuses — not the
+  contents of uploaded files.
+- **Integration** — API keys with read/write scopes, and HMAC-signed webhooks with a fixed
+  event list, a test-fire button and delivery history. Admin-only.
+- **Analytics** — a fixed KPI dashboard for change cycle time, BOM health, requirement
+  coverage and top cost drivers, filtered by the same item-level access rules as the rest
+  of the app. Not a report builder.
+- **Exports** — multi-level BOM to CSV from any revision, material requirements to CSV,
+  and the ERP-shaped item/BOM extracts above.
 
 ---
 

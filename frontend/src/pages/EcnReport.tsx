@@ -5,13 +5,14 @@ import { App as AntdApp, Button, Empty, Spin } from 'antd';
 import { ArrowLeftOutlined, PrinterOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
-import type { EcnDetail, EcnImpactEntry } from '../api/types';
+import type { EcnDetail, EcnImpactEntry, SignatureManifest } from '../api/types';
 import {
   ECN_DISPOSITION_META,
   ECN_PRIORITY_META,
   ECN_REVIEW_DECISION_META,
   ECN_STATUS_META,
   formatDate,
+  MEANING_META,
 } from '../components/meta';
 
 const pageStyle: CSSProperties = {
@@ -95,6 +96,7 @@ export default function EcnReport() {
 
   const [ecn, setEcn] = useState<EcnDetail | null>(null);
   const [impact, setImpact] = useState<EcnImpactEntry[] | null>(null);
+  const [manifest, setManifest] = useState<SignatureManifest | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -105,12 +107,14 @@ export default function EcnReport() {
       return;
     }
     try {
-      const [detail, impactEntries] = await Promise.all([
+      const [detail, impactEntries, signatures] = await Promise.all([
         api.getEcn(ecnId),
         api.getEcnImpact(ecnId).catch(() => null),
+        api.getSignatureManifest('ECN', ecnId).catch(() => null),
       ]);
       setEcn(detail);
       setImpact(impactEntries);
+      setManifest(signatures);
       setNotFound(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) setNotFound(true);
@@ -277,6 +281,62 @@ export default function EcnReport() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {manifest && manifest.entries.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <h2 style={{ fontSize: 14, marginBottom: 8 }}>Electronic signatures</h2>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#fafafa' }}>
+                  <th style={{ textAlign: 'left', padding: 6, border: '1px solid #d9d9d9' }}>
+                    Meaning
+                  </th>
+                  <th style={{ textAlign: 'left', padding: 6, border: '1px solid #d9d9d9' }}>
+                    Printed name
+                  </th>
+                  <th style={{ textAlign: 'left', padding: 6, border: '1px solid #d9d9d9' }}>
+                    Role
+                  </th>
+                  <th style={{ textAlign: 'left', padding: 6, border: '1px solid #d9d9d9' }}>
+                    Date and time
+                  </th>
+                  <th style={{ textAlign: 'left', padding: 6, border: '1px solid #d9d9d9' }}>
+                    Method
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {manifest.entries.map((entry) => (
+                  <tr key={entry.requirement.id}>
+                    <td style={{ padding: 6, border: '1px solid #d9d9d9' }}>
+                      {MEANING_META[entry.requirement.meaning].label}
+                    </td>
+                    <td style={{ padding: 6, border: '1px solid #d9d9d9' }}>
+                      {entry.signature ? entry.signature.signedName : '— not signed —'}
+                    </td>
+                    <td style={{ padding: 6, border: '1px solid #d9d9d9' }}>
+                      {entry.signature ? entry.signature.signedRole : ''}
+                    </td>
+                    <td style={{ padding: 6, border: '1px solid #d9d9d9' }}>
+                      {entry.signature ? formatDate(entry.signature.signedAt) : ''}
+                    </td>
+                    <td style={{ padding: 6, border: '1px solid #d9d9d9' }}>
+                      {entry.signature
+                        ? entry.signature.authMethod === 'PASSWORD'
+                          ? 'Password'
+                          : 'SSO confirmation'
+                        : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ fontSize: 10, color: '#8c8c8c', marginTop: 6 }}>
+              Signed content fingerprint {manifest.contentHash.slice(0, 24)}. A signature is
+              voided automatically if the content it covers changes.
+            </p>
           </div>
         )}
 

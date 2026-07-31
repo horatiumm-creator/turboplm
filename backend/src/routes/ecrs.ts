@@ -5,6 +5,8 @@ import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { notifyUsers } from '../lib/notify';
 import { emitEvent } from '../lib/webhooks';
+import { lockNumbering, withNumberLock } from '../lib/plm';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -24,7 +26,7 @@ interface EcrSummaryDto {
   title: string;
   priority: EcnPriority;
   status: EcrStatus;
-  part: { id: number; partNumber: string; name: string } | null;
+  part: { id: number; partNumber: string; name: string } | typeof REDACTED | null;
   ecn: { id: number; ecnNumber: string } | null;
   createdBy: UserRefDto;
   createdAt: string;
@@ -50,7 +52,24 @@ const ecrInclude = {
 
 type EcrRow = Prisma.EcrGetPayload<{ include: typeof ecrInclude }>;
 
-function toEcrSummary(ecr: EcrRow): EcrSummaryDto {
+/**
+ * Rule X4 — an ECR is not a protected type, but it may name a part and an ECN, each carrying
+ * its own grants. Redacted in place; the request itself (title, status, priority) stays.
+ */
+interface EcrVisibility {
+  parts: ReadonlySet<number>;
+  ecns: ReadonlySet<number>;
+}
+
+async function ecrVisibility(ecrs: EcrRow[], user: AclUser): Promise<EcrVisibility> {
+  const [parts, ecns] = await Promise.all([
+    visibleIds('PART', ecrs.flatMap((e) => (e.part ? [e.part.id] : [])), user),
+    visibleIds('ECN', ecrs.flatMap((e) => (e.ecn ? [e.ecn.id] : [])), user),
+  ]);
+  return { parts, ecns };
+}
+
+function toEcrSummary(ecr: EcrRow, vis: EcrVisibility): EcrSummaryDto {
   return {
     id: ecr.id,
     ecrNumber: ecr.ecrNumber,
@@ -58,17 +77,24 @@ function toEcrSummary(ecr: EcrRow): EcrSummaryDto {
     priority: ecr.priority,
     status: ecr.status,
     part: ecr.part
-      ? { id: ecr.part.id, partNumber: ecr.part.partNumber, name: ecr.part.name }
+      ? vis.parts.has(ecr.part.id)
+        ? { id: ecr.part.id, partNumber: ecr.part.partNumber, name: ecr.part.name }
+        : { ...REDACTED }
       : null,
-    ecn: ecr.ecn ? { id: ecr.ecn.id, ecnNumber: ecr.ecn.ecnNumber } : null,
+    ecn: ecr.ecn
+      ? {
+          id: ecr.ecn.id,
+          ecnNumber: vis.ecns.has(ecr.ecn.id) ? ecr.ecn.ecnNumber : REDACTED.name,
+        }
+      : null,
     createdBy: { id: ecr.createdBy.id, name: ecr.createdBy.name },
     createdAt: ecr.createdAt.toISOString(),
   };
 }
 
-function toEcrDetail(ecr: EcrRow): EcrDetailDto {
+function toEcrDetail(ecr: EcrRow, vis: EcrVisibility): EcrDetailDto {
   return {
-    ...toEcrSummary(ecr),
+    ...toEcrSummary(ecr, vis),
     description: ecr.description,
     resolution: ecr.resolution,
     resolvedBy: ecr.resolvedBy ? { id: ecr.resolvedBy.id, name: ecr.resolvedBy.name } : null,
@@ -76,15 +102,20 @@ function toEcrDetail(ecr: EcrRow): EcrDetailDto {
   };
 }
 
-async function getEcrDetailOrThrow(id: number): Promise<EcrDetailDto> {
+async function getEcrDetailOrThrow(id: number, user: AclUser): Promise<EcrDetailDto> {
   const ecr = await prisma.ecr.findUnique({ where: { id }, include: ecrInclude });
   if (!ecr) throw new HttpError(404, 'ECR not found');
-  return toEcrDetail(ecr);
+  return toEcrDetail(ecr, await ecrVisibility([ecr], user));
 }
 
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
 
 function currentUserId(req: Request): number {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
@@ -140,8 +171,8 @@ function parseBodyId(value: unknown, label: string): number {
 }
 
 /** Rule T2 — scan-based numbering, ECR-10001 style (same approach as parts/ECNs). */
-async function generateEcrNumber(): Promise<string> {
-  const rows = await prisma.$queryRaw<{ max: number | null }[]>`
+async function generateEcrNumber(db: Prisma.TransactionClient = prisma): Promise<string> {
+  const rows = await db.$queryRaw<{ max: number | null }[]>`
     SELECT MAX(SUBSTRING("ecrNumber" FROM 5)::int) AS max
     FROM "Ecr"
     WHERE "ecrNumber" ~ '^ECR-[0-9]{1,9}$'`;
@@ -192,7 +223,8 @@ router.get(
       }),
     ]);
 
-    res.json({ items: ecrs.map(toEcrSummary), total, page, pageSize });
+    const vis = await ecrVisibility(ecrs, aclUser(req));
+    res.json({ items: ecrs.map((ecr) => toEcrSummary(ecr, vis)), total, page, pageSize });
   })
 );
 
@@ -214,27 +246,32 @@ router.post(
     let partId: number | null = null;
     if (body.partId !== undefined && body.partId !== null) {
       partId = parseBodyId(body.partId, 'partId');
-      const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+      // A restricted part answers like a missing one (rule X2).
+      const part = await prisma.part.findFirst({
+        where: { id: partId, ...(aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput) },
+        select: { id: true },
+      });
       if (!part) throw new HttpError(404, 'Part not found');
     }
 
-    const createEcrRecord = (ecrNumber: string) =>
-      prisma.ecr.create({
+    const createEcrRecord = (ecrNumber: string, db: Prisma.TransactionClient = prisma) =>
+      db.ecr.create({
         data: { ecrNumber, title, description, priority, partId, createdById: userId },
         select: { id: true, ecrNumber: true },
       });
 
     // Numbers can only collide under concurrent creates — regenerate and retry.
-    const created = await (async () => {
+    const created = await withNumberLock(async (tx) => {
+      // Serialized allocation; the retry is a backstop for a manually-typed clash.
       for (let attempt = 0; ; attempt++) {
         try {
-          return await createEcrRecord(await generateEcrNumber());
+          return await createEcrRecord(await generateEcrNumber(tx), tx);
         } catch (err) {
           if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
           throw err;
         }
       }
-    })();
+    });
 
     // ECR_RAISED — tell every admin; outside a transaction, so a delivery
     // failure must not undo the create.
@@ -271,7 +308,7 @@ router.post(
       console.error('Failed to queue ecr.raised webhook', err);
     }
 
-    res.status(201).json(await getEcrDetailOrThrow(created.id));
+    res.status(201).json(await getEcrDetailOrThrow(created.id, aclUser(req)));
   })
 );
 
@@ -282,7 +319,7 @@ router.post(
 router.get(
   '/ecrs/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getEcrDetailOrThrow(idParam(req.params.id)));
+    res.json(await getEcrDetailOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -315,14 +352,17 @@ router.patch(
         data.part = { disconnect: true };
       } else {
         const partId = parseBodyId(body.partId, 'partId');
-        const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+        const part = await prisma.part.findFirst({
+          where: { id: partId, ...(aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput) },
+          select: { id: true },
+        });
         if (!part) throw new HttpError(404, 'Part not found');
         data.part = { connect: { id: partId } };
       }
     }
 
     await prisma.ecr.update({ where: { id }, data });
-    res.json(await getEcrDetailOrThrow(id));
+    res.json(await getEcrDetailOrThrow(id, aclUser(req)));
   })
 );
 
@@ -388,8 +428,8 @@ router.post(
     if (body.ecnId !== undefined && body.ecnId !== null) {
       // Link an existing ECN.
       const ecnId = parseBodyId(body.ecnId, 'ecnId');
-      const ecn = await prisma.ecn.findUnique({
-        where: { id: ecnId },
+      const ecn = await prisma.ecn.findFirst({
+        where: { id: ecnId, ...(aclFilter('ECN', aclUser(req)) as Prisma.EcnWhereInput) },
         select: { id: true, ecnNumber: true },
       });
       if (!ecn) throw new HttpError(404, 'ECN not found');
@@ -401,6 +441,9 @@ router.post(
       // under concurrent creates — regenerate and retry the whole transaction.
       const acceptWithNewEcn = () =>
         prisma.$transaction(async (tx) => {
+          // Same numbering lock POST /ecns takes; see the note in quality.ts's escalate path
+          // for why a retry cannot substitute for it inside a transaction.
+          await lockNumbering(tx);
           const ecn = await tx.ecn.create({
             data: {
               ecnNumber: await generateEcnNumber(tx),
@@ -458,7 +501,7 @@ router.post(
       }
     }
 
-    res.json(await getEcrDetailOrThrow(id));
+    res.json(await getEcrDetailOrThrow(id, aclUser(req)));
   })
 );
 
@@ -517,7 +560,7 @@ router.post(
       console.error('Failed to deliver ECR_REJECTED notification', err);
     }
 
-    res.json(await getEcrDetailOrThrow(id));
+    res.json(await getEcrDetailOrThrow(id, aclUser(req)));
   })
 );
 

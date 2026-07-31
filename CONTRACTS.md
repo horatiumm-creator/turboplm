@@ -747,6 +747,914 @@ Numbering: scan-max + retry on P2002, exactly like generatePartNumber —
   (/suppliers, ShopOutlined); register every route above; extend the selectedKey prefixes
   (including /ncrs and /capas mapping to /quality).
 
+## CAD-driven BOM and eBOM / mBOM reconciliation
+
+The eBOM is `BomLine` on a `PartRevision` — what engineering designed. The mBOM is the
+`ProcessPlan` → `Operation` → `OperationMaterial` chain — what manufacturing consumes, and
+where. They are deliberately separate structures; these rules connect them.
+
+Schema additions to `OperationMaterial`:
+`scrapFactor Float @default(0)` (0.02 = 2 % expected loss) and
+`consumable Boolean @default(false)` (adhesive, solder, thread-lock — legitimately absent
+from the eBOM, so it must not read as an mBOM-only defect).
+
+### C1 — Assembly extraction (`cad/src/index.js`)
+- `POST /assembly {storagePath, fileName}` → same status envelope as `/convert`:
+  `{status:'SKIPPED',reason}` for non-CAD extensions, `{status:'FAILED',error}` when the
+  kernel cannot read the file, else `{status:'DONE', root, nodeCount, maxDepth}`.
+- `root` is an `{name, instances, children[]}` tree built from the occt `root` node.
+  Siblings with the same name **and** the same subtree shape collapse into one node with
+  `instances` summed — a STEP file repeats an instanced part once per placement, and a BOM
+  wants quantity 4, not four lines. Unnamed products become `Unnamed`.
+- occt wraps the real product in an anonymous root; when the root name is empty and it has
+  exactly one child, that child becomes the returned root.
+
+### C2 — The cBOM: persisted CAD structure (EDIT `src/routes/documents.ts`)
+The CAD BOM is a first-class structure, not a transient read. Models `CadStructure`
+(one per `DocumentVersion`, cascade-deleted with it) and `CadNode` (self-referencing tree:
+`parentId`, `name`, `instances`, `depth`, `seq`). A `DocumentVersion` is immutable, so its
+snapshot is versioned with the file and cannot drift from it.
+
+- Extraction runs exactly where conversion does — after document create and add-version,
+  fire-and-forget, and again on `POST /document-versions/:id/convert`. It reuses the
+  `ConversionStatus` enum (`PENDING`/`DONE`/`SKIPPED`/`FAILED`) on `CadStructure.status`,
+  with `error` for the failure text. Extraction never fails the upload.
+- `GET /document-versions/:id/assembly` → `CadAssembly` serves the **persisted** tree and
+  extracts on first access when no snapshot exists yet, so the kernel is not re-run per
+  page view. Never 409 on format — a non-CAD file is `status:'SKIPPED'`.
+- `POST /document-versions/:id/assembly/refresh` re-extracts and returns the new snapshot.
+- **Part matches are resolved at read time, never stored.** A part created after the CAD
+  upload must start matching immediately; a stored match would go stale. Resolution is one
+  query over the distinct names: exact case-insensitive `partNumber` (`by:'PART_NUMBER'`),
+  then case-insensitive `name` (`by:'NAME'`), else `match:null`. A name matching more than
+  one part stays unmatched — guessing would put the wrong part on a BOM.
+
+### C2a — cBOM ↔ eBOM reconciliation (`src/routes/bom.ts`)
+- `GET /revisions/:id/cbom-reconciliation?documentVersionId=` → `CbomReconciliation`.
+  Without the query parameter it picks the newest readable CAD version linked to the part
+  or the revision; 409 `No CAD model is linked to this part` when there is none.
+- Compares the CAD root's immediate children against the revision's eBOM, one row per
+  part or unmatched CAD name, with `status`: `MATCH`, `QTY_MISMATCH`,
+  `MISSING_IN_EBOM` (modelled but not released), `EXTRA_IN_EBOM` (released but not
+  modelled), `UNMATCHED` (CAD product with no part). Same severity-first ordering as
+  the eBOM ↔ mBOM view. This is the design-vs-engineering half of the triangle
+  cBOM → eBOM → mBOM.
+
+### C2b — cBOM version diff (`src/routes/documents.ts`)
+- `GET /document-versions/:fromId/cad-diff/:toId` → `CadStructureDiff`: what changed in
+  the model between two CAD versions. Rows are keyed by **full node path** (`A/B/C`) so a
+  part appearing at two places in the tree is two rows, with `change`: `ADDED`, `REMOVED`,
+  `QTY_CHANGED`, `UNCHANGED`. 409 when either version has no DONE snapshot.
+
+### C3 — CAD → eBOM (EDIT `src/routes/bom.ts`, to reuse the cycle/find-number helpers)
+- `POST /revisions/:id/bom-from-cad {documentVersionId, apply?, removeMissing?,
+  createMissingParts?, recursive?}` → `CadBomProposal`. Reads the persisted cBOM (rule C2).
+- Default scope is **one level**: the immediate children of the CAD assembly root map to
+  this revision's eBOM lines. Deeper CAD levels belong to the child parts' own BOMs and are
+  reported in `deeperNodeCount`.
+- `recursive:true` imports the whole tree: every CAD node that matches a part **and** has
+  children contributes its children to that part's latest IN_WORK revision. A matched part
+  with no IN_WORK revision is skipped and reported in `skippedAssemblies` (with the reason)
+  rather than failing the request — one un-editable sub-assembly must not block the rest.
+  The response gains `assemblies[]`, one entry per imported level with its own counts.
+- Each proposal line carries `change`: `ADD` (CAD node matched to a part not on the BOM),
+  `QTY_CHANGE` (on the BOM with a different quantity), `UNCHANGED`, `UNMATCHED` (no part
+  matched — nothing to add), `REMOVE` (BOM line with no corresponding CAD node).
+- `apply:false` (default) computes the proposal and writes nothing.
+- `apply:true` requires IN_WORK (409 with the standard lifecycle message) and applies
+  `ADD` + `QTY_CHANGE` only. `REMOVE` is applied **only** when `removeMissing:true`, so a
+  partial CAD export cannot silently strip a BOM.
+- `createMissingParts:true` first creates a part per `UNMATCHED` name (generated part
+  number, name = the CAD name, category `MECHANICAL`, plus revision `A`), turning those
+  lines into `ADD`.
+- 409 `The CAD file has no readable assembly structure` when the assembly status is not
+  DONE. Cycle and find-number rules are the existing ones — a CAD node that would create a
+  cycle fails the whole request with the existing cycle message.
+
+### C4 — mBOM from eBOM (EDIT `src/routes/process.ts`)
+- `POST /revisions/:id/process-plan/from-bom` → `ProcessPlanDetail`. Requires IN_WORK.
+- 409 `Add eBOM lines before generating a manufacturing plan` when the eBOM is empty.
+- Creates the plan when absent, then appends one operation (`seq` = max+1, name
+  `Assembly`) consuming every eBOM line **not already consumed anywhere in the plan**,
+  copying quantity and uom. 409 `Every eBOM line is already consumed by an operation` when
+  there is nothing left to add — so the button is safe to press twice.
+- `POST /operations/:id/materials` and `PATCH /operation-materials/:id` accept
+  `scrapFactor` (>= 0, < 1) and `consumable`.
+
+### C5 — Reconciliation (EDIT `src/routes/process.ts`)
+- `GET /revisions/:id/bom-reconciliation` → `BomReconciliation` (per types.ts). Works with
+  no plan (`hasPlan:false`, every eBOM line `MISSING_IN_MBOM`).
+- One row per part appearing in either structure, with two mBOM figures rounded to 6 dp:
+  `mbomNominalQuantity` = `Σ quantity` and `mbomQuantity` = `Σ quantity × (1 + scrapFactor)`.
+  **The status compares the nominal figure** — a scrap factor is expected process loss, so
+  it must not read as a discrepancy; `mbomQuantity` is reported for planning.
+- `status`: `MATCH` (both, nominal quantities within 1e-6), `QTY_MISMATCH` (both, differ),
+  `MISSING_IN_MBOM` (eBOM only — nothing consumes it), `CONSUMABLE_ONLY` (mBOM only and
+  every consuming material is `consumable`), `EXTRA_IN_MBOM` (mBOM only, not consumable).
+- Rows sort by severity — QTY_MISMATCH, MISSING_IN_MBOM, EXTRA_IN_MBOM, CONSUMABLE_ONLY,
+  MATCH — then by partNumber, so defects are at the top.
+
+### Frontend — the three BOMs
+- Part tabs read design → engineering → manufacturing: `cBOM`, `eBOM`,
+  `mBOM / Manufacturing`.
+- `components/part/CbomTab.tsx`: a CAD-version selector, the extraction status with a
+  refresh action, the cBOM as an expandable tree (product name, instances, matched part,
+  unmatched flagged), the cBOM ↔ eBOM reconciliation panel, and a second selector to diff
+  this CAD version against another.
+- `components/part/BomTab.tsx`: an "Import from CAD" button (IN_WORK only) opens a modal
+  that lists the CAD document versions linked to this part or revision, fetches the
+  assembly, and shows the proposal table (change tag, CAD name, matched part, CAD qty vs
+  BOM qty) with checkboxes for `removeMissing` / `createMissingParts` before Apply.
+  Surface `deeperNodeCount` as a note, not an error.
+- `components/part/ProcessTab.tsx`: a reconciliation Card above the operations — counts as
+  a summary, a row per part with a status tag, and the consuming operations listed. A
+  "Generate from eBOM" button when IN_WORK. Operation-material forms gain scrap % and a
+  consumable switch.
+- Tab labels on PartDetail become `eBOM` and `mBOM / Manufacturing` so the two structures
+  are named the way manufacturing names them.
+
+## Electronic signatures and controlled release
+
+Shaped after 21 CFR Part 11 and ISO 13485: a signature is an immutable record of *who*
+signed, *what* they signed, *what it meant*, and *when* — and it must stop being trusted
+the moment the signed content changes. Models `SignatureRequirement` and
+`ElectronicSignature`, enums `SignedEntityType` (`ECN` | `REVISION` | `DOCUMENT`),
+`SignatureMeaning` (`AUTHORED` | `REVIEWED` | `APPROVED` | `QA_APPROVED`),
+`SignatureStatus` (`VALID` | `VOIDED`), `SignatureAuthMethod` (`PASSWORD` | `EMAIL_CONFIRM`).
+
+### S1 — Requirements (admin-configurable)
+- `SignatureRequirement`: `entityType`, `meaning`, `seq`, and exactly one of `role` (any
+  user holding it may sign) or `userId` (a named signer); `active` toggles it off without
+  losing history. Unique on (`entityType`, `meaning`, `seq`).
+- Admin-only CRUD at `/signature-requirements` (GET list, POST, PATCH, DELETE). 400 when
+  neither or both of `role`/`userId` are given.
+
+### S2 — Executing a signature (`src/routes/signatures.ts`)
+- `POST /:entityType/:id/signatures {meaning, password?, confirmEmail?, comment?}` → 201.
+- **Re-authentication is mandatory.** An account with a password must re-enter it
+  (`authMethod:'PASSWORD'`); 401 `Password is incorrect` on mismatch. A Google-only account
+  has no password, so it must retype its own email address exactly
+  (`authMethod:'EMAIL_CONFIRM'`); 401 when it does not match. The method used is stored on
+  the record, so the strength of each signature is auditable. Never accept a signature with
+  neither component.
+- 403 for VIEWER. 409 when the acting user does not satisfy any active requirement for that
+  meaning, listing what is required. 409 `You have already signed this as <meaning>` when a
+  VALID signature by the same user with the same meaning exists.
+- The record captures a **standalone** copy of the signer's printed name and role plus the
+  content hash — Part 11 §11.50 requires the record to be readable without joining to a
+  user row that may later change.
+- Signatures are append-only: there is no PATCH and no DELETE. They are voided, never
+  removed.
+
+### S3 — Content hashing and voiding
+- `contentHash` is a SHA-256 over a **canonical** projection of the signed entity, built by
+  `lib/signing.ts`:
+  - `REVISION` — the part number, revision label, and every BOM line (find number, child
+    part number, quantity, uom, ref designators) sorted. **Lifecycle is excluded**:
+    advancing it is what the signature authorizes, so hashing it would make a release void
+    its own authorization.
+  - `ECN` — the ECN number, title, priority, disposition, and every item
+    (part number, from/to revision labels) sorted by part number.
+  - `DOCUMENT` — the doc number, title, category, and the latest version's file name plus
+    byte size.
+- `GET /:entityType/:id/signatures` → `SignatureManifest`: the current hash, every
+  requirement with its signature (or null), and `complete`. Any VALID signature whose
+  `contentHash` differs from the current hash is **voided in place on read**
+  (`status:'VOIDED'`, `voidedReason` naming the change) before the manifest is returned —
+  so a stale signature can never satisfy a release gate, even if nothing wrote to the
+  entity through the API.
+
+### S4 — Release gates
+- ECN `approve` additionally requires every active `ECN` requirement to hold a VALID
+  signature; 409 `Cannot approve: signatures outstanding for: <meanings>`.
+- Revision `approve` (IN_REVIEW → RELEASED) requires the same for `REVISION`
+  requirements; 409 with the same shape. Revisions released *through* an ECN are gated by
+  the ECN's own manifest, not twice.
+- With no active requirements for an entity type, nothing is gated — the feature is opt-in
+  so an unregulated shop is unaffected.
+
+### Frontend — signatures
+- `components/SignaturePanel.tsx`, reused on `EcnDetail` and the part revision: the
+  manifest as a table (meaning, who may sign, signer, date/time, method, status), a "Sign"
+  button per unmet requirement the current user may satisfy, and a modal that takes the
+  password (or email confirmation) plus an optional comment. Voided rows render struck
+  through with their reason.
+- A signature block suitable for printing appears on `EcnReport`: printed name, meaning,
+  date/time and method per Part 11 §11.50.
+- `pages/SignatureRequirementsAdmin.tsx` at `/admin/signatures` (ADMIN only, sidebar entry
+  `SignatureOutlined`) for the requirement matrix.
+
+## Supplier portal
+
+External suppliers get their own scoped accounts, their own login, and their own thin UI.
+The whole feature exists to let a supplier quote an RFQ **without** being able to see the
+PLM — so the isolation rules below are the feature, not an afterthought.
+
+Models `SupplierUser` (belongs to a `Supplier`; unique email; nullable `passwordHash`
+until the invitation is accepted; single-use `inviteToken` + `inviteExpiresAt`; `active`)
+and `RfqInvitation` (unique on `rfqId` + `supplierId`, with `invitedById`, `invitedAt`,
+`respondedAt`).
+
+### P1 — Two separate identities
+- A supplier session is a **different kind of token** from an internal one: the JWT carries
+  `kind:'supplier'` and rides in the `turboplm_portal` cookie, distinct from the internal
+  `turboplm_token`, so the two sessions can coexist in one browser.
+- `requireAuth` rejects a supplier token (401). `requireSupplierAuth` rejects an internal
+  token (401). Neither is a superset of the other: an internal admin does **not** get
+  portal access by virtue of being an admin, and a supplier can never reach `/api/*`
+  internal routes. This is enforced at the middleware, not per-route.
+- Portal routes live under `/api/portal/*` and are the only routes the supplier middleware
+  guards.
+
+### P2 — Accounts and invitations (internal side)
+- `POST /suppliers/:id/users {email, name}` → 201 `SupplierUserDto` and a single-use
+  invitation token valid 14 days. The token is returned **once** in the response (as
+  `inviteUrl`) and stored hashed-at-rest is not required, but it is never returned again by
+  any later read. 409 on a duplicate email.
+- `POST /supplier-users/:id/reset-invite` → issues a fresh token, invalidating the old one.
+- `PATCH /supplier-users/:id {active}` deactivates without deleting: a supplier who has
+  quoted is part of the record.
+- All three are ENGINEER-or-above; VIEWER is rejected by the existing write guard.
+- `POST /rfqs/:id/invitations {supplierId}` (409 unless the RFQ is DRAFT or SENT; 409 if
+  the supplier is already invited), `GET /rfqs/:id/invitations`,
+  `DELETE /rfq-invitations/:id` (409 once that supplier has quoted — removing it would
+  orphan the quote).
+
+### P3 — Accepting and signing in (portal side, unauthenticated)
+- `POST /portal/accept-invite {token, password}` → sets the password (min 12 chars, same
+  rule as the admin bootstrap), clears the token, returns a portal session. 400 on an
+  unknown, used, or expired token — with the same message for all three, so the endpoint
+  cannot be used to probe which tokens exist.
+- `POST /portal/login {email, password}` → 401 `Invalid email or password` for a wrong
+  password, an unknown email, an inactive account, or an account that has not accepted its
+  invitation. One message for every case.
+- `POST /portal/logout`, `GET /portal/me`.
+
+### P4 — What a supplier may see (the isolation rules)
+- `GET /portal/rfqs` lists **only** RFQs this supplier is invited to **and** whose status is
+  SENT, CLOSED or AWARDED. A DRAFT RFQ is never visible — invitations may be prepared
+  before the RFQ is sent.
+- `GET /portal/rfqs/:id` 404s (not 403) for any RFQ the supplier is not invited to, so the
+  endpoint does not confirm that an RFQ exists.
+- A supplier sees the lines, and **only their own quotes**. Competitors' prices, the
+  quote count, `isLowest`, and which supplier won are all withheld. A line awarded
+  elsewhere reports `awardedToMe:false` with no supplier named; awarded to them reports
+  `awardedToMe:true`.
+- `POST /portal/rfq-lines/:id/quotes` creates or replaces this supplier's own quote for the
+  line (409 unless the RFQ is SENT; 409 once the line is awarded), stamps
+  `RfqInvitation.respondedAt`, and reuses the existing quote validation (unitPrice > 0).
+- `DELETE /portal/rfq-quotes/:id` withdraws their own quote while the RFQ is still SENT;
+  404 for a quote that is not theirs.
+
+### Frontend — portal
+- Routes outside `AppLayout` so the PLM chrome never renders for a supplier:
+  `/portal/login`, `/portal/accept-invite`, `/portal` (RFQ list), `/portal/rfqs/:id`.
+  A minimal `PortalLayout` with the supplier's name and a sign-out control.
+- `pages/portal/PortalRfqDetail.tsx` shows the lines with the supplier's own quote inline
+  and a single "Submit quote" form per line — never a comparison table.
+- Internal side: a "Suppliers invited" card on `RfqDetail` (invite, revoke, and whether
+  each has responded), and supplier-user management on `Suppliers` with the one-time
+  invitation link surfaced for copying.
+
+## Serial / lot tracking and as-built records
+
+The eBOM says what *should* be built; the as-built record says what *was*. This module
+records real physical output and makes it traceable in both directions — the capability that
+turns "a bad lot of cells shipped" from a guess into a list of serial numbers.
+
+**One node type, deliberately.** A serialized unit (quantity 1, unique serial) and a lot
+(quantity N, one code) are modelled as a single `BuildUnit` discriminated by `kind`, rather
+than two tables. Genealogy is then a tree over one node type, so a recursive trace does not
+need to branch on which table it landed in — the alternative doubles every query in the
+module for no expressive gain.
+
+Models: `BuildUnit` (kind `SERIAL`|`LOT`, unique `identifier`, `partId`,
+`partRevisionId` — the revision it was built to, `quantity`, status, `builtAt`,
+`shippedAt`, `notes`) and `AsBuiltLine` (`parentId`, `childId`, `quantity`, nullable
+`bomLineId`, `substitution`, `recordedById`, unique on `parentId`+`childId`).
+Enums `BuildKind` and `BuildStatus` (`IN_PROGRESS`|`COMPLETED`|`SCRAPPED`|`SHIPPED`).
+
+### U1 — Identity and numbering
+- `identifier` is user-supplied or generated. Generated serials are `SN-10001` upwards and
+  lots `LOT-10001`, both scan-max **through `withNumberLock`** (lib/plm.ts) like every other
+  generator — never the unlocked pattern.
+- A `SERIAL` unit has `quantity` exactly 1; 400 otherwise. A `LOT` requires `quantity > 0`.
+- `partRevisionId` must belong to `partId` (400) and must be RELEASED (409
+  `Cannot build to <rev>: it is <lifecycle>`) — you do not build production hardware to an
+  unreleased revision.
+
+### U2 — Build status (`src/routes/units.ts`)
+- `GET /build-units?kind&status&partId&search&page&pageSize` → `Paged<BuildUnitSummary>`,
+  newest first; search matches identifier.
+- `POST /build-units`, `GET/PATCH /build-units/:id`. PATCH is blocked once SHIPPED or
+  SCRAPPED (409 `<identifier> is <status> and cannot be modified`).
+- `POST /build-units/:id/transition {action}`: `complete` IN_PROGRESS→COMPLETED sets
+  `builtAt`; `ship` COMPLETED→SHIPPED sets `shippedAt`; `scrap` from IN_PROGRESS or
+  COMPLETED → SCRAPPED; `reopen` COMPLETED→IN_PROGRESS clears `builtAt` (409 when it is
+  already consumed by a parent — reopening would invalidate that parent's record).
+  Conditional `updateMany` + 409 on concurrent change, as elsewhere.
+
+### U3 — Recording what was consumed
+- `POST /build-units/:id/as-built {childId, quantity, bomLineId?}` → 201 `BuildUnitDetail`.
+- The parent must be IN_PROGRESS (409 `<identifier> is <status> — reopen it to change the
+  as-built record`).
+- The child must be COMPLETED or SHIPPED (409 `<identifier> is <status> and cannot be
+  consumed`): you cannot build something into a product before it is itself finished.
+- **Cycle prevention**, same shape as the BOM's: a unit may not appear in its own genealogy,
+  transitively. Serialize with `pg_advisory_xact_lock(hashtext('turboplm-as-built'))` and
+  check inside the transaction, so two concurrent records cannot both pass.
+- A SERIAL child may be consumed by at most one parent (409 `<identifier> is already built
+  into <parent>`) — one physical object is in one place. A LOT child may be split across
+  many parents, but the total consumed may not exceed its `quantity` (409 naming the
+  remaining balance).
+- `substitution` is computed, never supplied: true when the child's part differs from the
+  part on the referenced `bomLineId`. A `bomLineId` from a different revision than the
+  parent's is 400. Omitting `bomLineId` records an unplanned consumption and is allowed —
+  reality is what is being recorded.
+- `DELETE /as-built-lines/:id` → 204, parent must be IN_PROGRESS.
+
+### U4 — Genealogy, both directions (`src/routes/traceability.ts`)
+- `GET /build-units/:id/genealogy` → `GenealogyNode` tree: what went into this unit,
+  recursively, depth-capped at 15 with `truncated:true` at the cap. Each node carries the
+  unit, the part, the consumed quantity, `substitution`, and whether it has open
+  nonconformances.
+- `GET /build-units/:id/where-consumed` → the forward trace: every unit this one ended up
+  in, recursively, up to the topmost parents. This is the recall query — given a suspect
+  lot, it answers which shipped serials contain it. Response includes `shippedUnits`, the
+  subset with status SHIPPED, because that is the list someone has to act on.
+- Both 404 on an unknown id and are read-only for any authenticated role.
+
+### U5 — As-built vs as-designed (`src/routes/traceability.ts`)
+- `GET /build-units/:id/deviations` → `DeviationReport` comparing the unit's as-built lines
+  against the eBOM of its `partRevisionId`, one row per part with `status`:
+  `MATCH`, `QTY_MISMATCH`, `MISSING` (on the eBOM, never consumed), `UNPLANNED` (consumed,
+  not on the eBOM), `SUBSTITUTED` (an approved `BomLineAlternate` was used — reported
+  distinctly, not as a defect). Severity-first ordering, then partNumber, matching the
+  eBOM↔mBOM view.
+
+### U6 — Unit effectivity on changes
+- `Ecn.effectiveFromSerial String?` alongside the existing `effectivityDate`. Free text, not
+  a foreign key: "effective from S/N 0042" is routinely written before that unit exists.
+- Surfaced on `EcnDetail` and editable while the ECN is DRAFT or IN_REVIEW. 400 when both
+  `effectivityDate` and `effectiveFromSerial` are set — an ECN is effective by date or by
+  unit, and claiming both makes the cut-in ambiguous.
+
+### U7 — Quality linkage
+- `Nonconformance.buildUnitId Int?` joins an NCR to a real unit. The existing free-text
+  `lotOrSerial` stays for records that predate a tracked unit; when `buildUnitId` is set the
+  API also returns the resolved unit, and `lotOrSerial` is left untouched.
+- `GET /build-units/:id` includes its nonconformances, so a unit's quality history is on one
+  page.
+
+### Frontend — traceability
+- `pages/BuildUnits.tsx` at `/build-units` (filterable table, create modal) and
+  `pages/BuildUnitDetail.tsx` at `/build-units/:id`: header with kind/status tags, the
+  status action bar, the as-built lines with an "Add consumed unit" modal (searchable unit
+  picker, eBOM line selector), the genealogy tree, the deviation report, and linked NCRs.
+- `pages/Traceability.tsx` at `/traceability`: pick a unit and see the forward trace, with
+  shipped units called out as the actionable set — the recall view.
+- Sidebar entries Build Units (`/build-units`, `BarcodeOutlined`) and Traceability
+  (`/traceability`, `NodeIndexOutlined`); extend the `selectedKey` prefixes.
+
+## Enterprise access — SSO and project permissions
+
+Two capabilities: sign-in federated to a corporate identity provider, and project-scoped
+access for people who should not see everything.
+
+### A1 — Harden the existing OAuth callback first (`src/routes/auth.ts`)
+The Google flow has two defects that must be fixed before any further provider is added,
+because generalising the flow would multiply them:
+- **No `state`.** The callback accepts any authorization code, so it is open to login-CSRF.
+  Generate a random `state`, store it in a short-lived signed httpOnly cookie
+  (`turboplm_oauth`, 10 minutes, `sameSite:'lax'`), and reject a callback whose `state` does
+  not match (redirect to `/login?error=state`). Clear the cookie on use — one state, one
+  callback.
+- **No `email_verified` check.** The callback links a provider identity to an existing local
+  account purely on matching email, which lets whoever controls an unverified address at an
+  IdP take over the matching account. Never link or provision on an unverified email:
+  redirect to `/login?error=unverified`. Google returns `email_verified` in userinfo; OIDC
+  returns it as an id_token claim.
+
+### A2 — Provider configuration (`IdentityProvider`)
+Model: `slug` (unique, URL-safe), `displayName`, `protocol` (`OIDC` only — see A5),
+`issuer`, `clientId`, `clientSecretEnc`, `discoveryUrl`, `enabled`, `autoProvision`,
+`allowedEmailDomains` (String[]), `defaultRole`, `groupClaim`, `groupRoleMap` (Json),
+`createdAt`/`updatedAt`.
+- The client secret is **encrypted at rest** with AES-256-GCM under a key from
+  `SSO_ENCRYPTION_KEY` (falling back to a key derived from `JWT_SECRET`, with a startup
+  warning when the dedicated variable is absent). It is a write-only field: **no read
+  endpoint ever returns it**, not even masked-but-recoverable.
+- Admin-only CRUD at `/identity-providers` (GET list, POST, PATCH, DELETE). GET returns
+  `hasClientSecret: boolean` instead of the value.
+- `GET /auth/providers` (already public) gains `sso: [{slug, displayName}]` for enabled
+  providers, so the login page can render the buttons. It must expose nothing else.
+
+### A3 — The OIDC flow (`src/routes/sso.ts`)
+- `GET /auth/sso/:slug/start` → 302 to the provider's authorization endpoint, resolved from
+  the discovery document (cached in memory for 10 minutes; a fetch failure is 503
+  `Identity provider is unavailable`, never a 500).
+- Uses **PKCE** (S256), plus `state` and `nonce`, all three carried in the same short-lived
+  signed cookie as A1. A callback missing or mismatching any of them is rejected.
+- `GET /auth/sso/:slug/callback` exchanges the code, then validates the id_token
+  **before trusting any claim**: signature against the provider's JWKS (cached), `iss`
+  exactly equal to the configured issuer, `aud` containing the client id, `exp`/`iat` within
+  60 seconds of clock skew, and `nonce` matching. Any failure redirects to
+  `/login?error=sso`, and the reason is logged server-side only.
+- On success the user gets the ordinary internal session cookie: SSO is a way to
+  authenticate, not a third kind of identity. (Contrast the supplier portal, rule P1, which
+  deliberately *is* a separate identity.)
+
+### A4 — Provisioning and linking
+- Linking order: existing `SsoIdentity` (provider + subject) → else a user with that verified
+  email, which is linked and recorded → else provision, if `autoProvision`.
+- `allowedEmailDomains`, when non-empty, is enforced on both provisioning **and** linking;
+  otherwise redirect `/login?error=domain`.
+- Role comes from `groupRoleMap` applied to the `groupClaim` values, first match wins, else
+  `defaultRole`. A mapping may never grant ADMIN by default — an explicit map entry is
+  required, so a misconfigured group claim cannot mint administrators.
+- On every subsequent sign-in the role is **re-evaluated** from claims, so removing someone
+  from an IdP group removes their access here. A role set manually in TurboPLM is overwritten
+  by the mapping — the IdP is the authority when one is configured. `SsoIdentity` model:
+  `providerId`, `subject`, `userId`, `lastLoginAt`, unique on (`providerId`, `subject`).
+
+### A5 — SAML is deliberately out of scope
+`protocol` is an enum with one value so the shape is ready, but SAML 2.0 is not implemented.
+Correct SAML means XML canonicalisation and signature verification, where subtle bugs are
+silent authentication bypasses; it is not something to hand-roll alongside everything else.
+The login page must not advertise it. Revisit with a vetted library, as its own piece of work.
+
+### A6 — Project membership (`ProjectMember`)
+Model: `projectId`, `userId`, `projectRole` (`LEAD`|`CONTRIBUTOR`|`OBSERVER`), `addedById`,
+`addedAt`, unique on (`projectId`, `userId`). `Project.restricted Boolean @default(false)`.
+- An unrestricted project behaves exactly as today: every authenticated user may read it.
+- A restricted project is visible only to its members and to global ADMINs. It is omitted
+  from `GET /projects` and 404s (not 403) on direct access, so a restricted project's
+  existence is not disclosed — the same rule as the supplier portal's RFQs.
+- Writes to a restricted project require LEAD or CONTRIBUTOR; OBSERVER is read-only within
+  it regardless of global role. Passing a phase gate requires LEAD.
+- `GET/POST /projects/:id/members`, `PATCH/DELETE /project-members/:id`. Only a LEAD or a
+  global ADMIN may change membership. The last LEAD cannot be removed or demoted (409),
+  so a restricted project cannot be orphaned.
+
+### A7 — (superseded)
+This tier adds **project**-level roles. Item-level access control, originally scoped out
+here, now exists: see the "Item-level access control" section (rules X1–X7), whose grants
+govern parts, documents, ECNs, projects and build units independently of project
+membership.
+
+### Frontend — enterprise access
+- `pages/IdentityProvidersAdmin.tsx` at `/admin/sso` (ADMIN only, `KeyOutlined`): provider
+  table, create/edit modal with the group→role map editor, and a secret field that shows
+  "configured" rather than any value.
+- `pages/Login.tsx`: a button per enabled SSO provider from `GET /auth/providers`, and
+  friendly text for each `?error=` code (`state`, `unverified`, `domain`, `sso`).
+- `ProjectDetail`: a Members card (add/remove, role select) and a "Restricted" toggle, both
+  visible only to a LEAD or global ADMIN. (Item visibility is governed separately by the
+  X-rules' grants.)
+
+## Vendor catalog import
+
+Bringing a vendor's parts catalog into the PLM. The hard part is not reading files — it is
+that every vendor names its columns differently and that a careless import silently creates
+thousands of duplicate parts. So the design is: stage everything, map explicitly, classify
+every row, show the user what will happen, and only then write.
+
+### What the formats actually are (why the design looks like this)
+
+| Source | Format | Notes |
+|---|---|---|
+| Anything, in practice | CSV / XLSX | The overwhelming majority. No agreed columns at all. |
+| Digi-Key export | CSV | `Digi-Key Part Number`, `Manufacturer`, `Manufacturer Part Number`, `Description`, `RoHS Status`, `Lead Free Status`, `REACH Status` |
+| Mouser export | CSV | `Mouser Part Number`, `Mfr. Part Number`, `Manufacturer Name`, `Description` |
+| Farnell / Newark | CSV | `Order Code` / `Newark Part Number`, `Manufacturer Part Number` |
+| RS Components | CSV | `RS Stock No.`, `Manufacturer Part Number` |
+| BMEcat (+ ETIM) | XML | The formal standard, v5.0, from BME (1999). Dominant in EU electrical / HVAC / plumbing / MRO. Products in `<ARTICLE>` with `SUPPLIER_AID`, `MANUFACTURER_AID`, `MANUFACTURER_NAME`, `DESCRIPTION_SHORT`, and ETIM class/feature blocks. |
+| McMaster-Carr | REST API | Client-certificate auth, approved customers only — no bulk file. Out of scope; noted so nobody looks for it. |
+
+The through-line: **column mapping is the feature**, not parsing. Hence reusable named
+mappings, vendor auto-detection from the header signature, and a mandatory preview.
+
+Models: `CatalogMapping`, `CatalogImport`, `CatalogImportRow`. Enums `CatalogFormat`
+(`CSV`|`XLSX`|`BMECAT_XML`), `CatalogImportStatus`
+(`DRAFT`|`VALIDATED`|`COMMITTED`|`FAILED`|`CANCELLED`), `CatalogRowStatus`
+(`NEW`|`UPDATE`|`DUPLICATE`|`INVALID`|`SKIPPED`|`COMMITTED`).
+
+### V1 — Target of an import
+A catalog row becomes up to three records, reusing the existing AML models rather than a
+parallel universe of vendor parts:
+- `Part` — the internal part (partNumber, name, description, category, uom, unitCost)
+- `Manufacturer` — matched by name, case-insensitively
+- `ManufacturerPart` — the MPN linking them, plus two new optional columns
+  `distributorName` and `distributorPartNumber` recording the offer the row came from.
+  One offer per row: multiple competing distributor offers for one MPN are **out of scope**
+  (that is what the RFQ module is for), and the contract says so rather than implying more.
+
+### V2 — Upload and staging (`src/routes/catalog.ts`)
+- `POST /catalog-imports` (multipart, field `file`, 25 MB cap) → 201 `CatalogImportDetail`.
+  Parses headers only far enough to stage rows; **writes nothing outside the import tables**.
+  Detects the format from the extension and, for XML, from a `<BMECAT>` root.
+  Auto-detects the vendor by header signature and returns `detectedVendor` plus
+  `suggestedMappingId` when a built-in preset matches.
+- Every source row is stored verbatim in `CatalogImportRow.raw`, so a mapping can be
+  re-applied later without re-uploading the file.
+- 400 `Unsupported file type` for anything but .csv/.tsv/.xlsx/.xml; 400
+  `The file has no data rows` for a header-only file; 413 for oversize (the existing
+  body-parser mapping already covers it).
+- `GET /catalog-imports` (Paged), `GET /catalog-imports/:id`, `DELETE /catalog-imports/:id`
+  (only while DRAFT/VALIDATED/FAILED/CANCELLED — a COMMITTED import is a record of what
+  entered the system and is 409 `<file> is committed and cannot be deleted`).
+
+### V3 — Mapping and validation
+- `POST /catalog-imports/:id/validate {mappingId?, fieldMap?, defaults?}` → `CatalogImportDetail`.
+  Re-runnable any number of times with a different mapping; each run replaces the previous
+  classification and **writes nothing to Part, Manufacturer or ManufacturerPart**.
+- `fieldMap` maps target field → source column name. Targets: `partNumber`, `name`,
+  `description`, `category`, `uom`, `unitCost`, `manufacturerName`, `mpn`,
+  `distributorName`, `distributorPartNumber`. `defaults` supplies values the file lacks
+  (e.g. `category: 'PURCHASED'`).
+- `name` and `mpn` are the only required targets: a catalog row without a description of
+  what it is, or without a manufacturer part number, is not importable. 400 naming what is
+  missing.
+- Per-row classification, in this order:
+  1. `INVALID` — a required target is empty, `unitCost` is not a number, or `category`/`uom`
+     is not a valid value. `message` says which field and why.
+  2. `DUPLICATE` — the same (manufacturerName, mpn) already appeared earlier **in this
+     file**. The first occurrence keeps its own status; later ones are DUPLICATE, so one
+     messy export cannot create the same part twice.
+  3. `UPDATE` — a `ManufacturerPart` already exists for that (manufacturer, mpn). The row
+     will amend the existing part rather than create one.
+  4. `NEW` — everything else.
+- The import moves to VALIDATED. Counts on the import are per status.
+
+### V4 — Commit
+- `POST /catalog-imports/:id/commit {createMissingManufacturers?, updateExisting?}` →
+  `CatalogImportDetail`. 409 unless the import is VALIDATED (`Validate the import before
+  committing`).
+- Processes NEW and, when `updateExisting`, UPDATE rows. INVALID, DUPLICATE and SKIPPED rows
+  are never written. Each committed row records its `partId`/`manufacturerPartId` and flips
+  to COMMITTED, so the import is an audit trail of exactly what it created.
+- A missing manufacturer is created only when `createMissingManufacturers` is true;
+  otherwise those rows fail individually with `message` set, and the rest still commit — one
+  unknown manufacturer must not abandon a 5,000-row import.
+- Parts without a `partNumber` in the file get generated ones **through `withNumberLock`**.
+  A bulk import is precisely the concurrent-burst case that made unlocked scan-max numbering
+  fail, so this path must not reintroduce it.
+- Commits in chunks inside a transaction per chunk, not one transaction for 5,000 rows, and
+  reports partial success honestly: status becomes COMMITTED when every eligible row landed,
+  FAILED when none did, and COMMITTED with a non-zero `failedCount` when some did.
+
+### V5 — Reusable mappings
+- `GET /catalog-mappings`, `POST`, `PATCH`, `DELETE` (`builtIn` mappings are read-only: 409
+  `<name> is a built-in mapping`). Unique on `name`.
+- Built-in presets seeded idempotently on boot for Digi-Key, Mouser, Farnell/Newark, RS
+  Components and BMEcat, each with the `headerSignature` that identifies it.
+- Saving a mapping from a completed import is the normal path to a house mapping, so
+  `POST /catalog-mappings` accepts `fromImportId` to seed `fieldMap` from that import.
+
+### Frontend — catalog import
+- `pages/CatalogImports.tsx` at `/catalog-imports`: the import list with status and counts,
+  and an upload control.
+- `pages/CatalogImportDetail.tsx` at `/catalog-imports/:id`: a three-step flow — **Map**
+  (target-field → column selects, pre-filled from the detected preset, with the first few
+  source rows shown so the user can see what they are mapping), **Preview** (rows grouped by
+  status, filterable, each INVALID row showing its reason, per-row skip), **Commit** (the two
+  toggles, a plain-language summary of what is about to be created or amended, then the
+  result). Never let Commit be the first button a user can reach.
+- `pages/CatalogMappingsAdmin.tsx` at `/admin/catalog-mappings` for the mapping library,
+  built-ins visibly read-only.
+- Sidebar entry Catalog Import (`/catalog-imports`, `ImportOutlined`).
+
+## Part classification, custom-attribute import, and materials
+
+Three connected additions. Classification already exists and already drives per-class data;
+the gaps are that the importer cannot reach custom attributes, and that nothing records what
+raw material a part is *made from*.
+
+### Where classification already stands (no new taxonomy)
+`Part.category` (`ASSEMBLY`|`MECHANICAL`|`ELECTRICAL`|`PURCHASED`|`RAW_MATERIAL`|`SOFTWARE`)
+is the classification, and `AttributeDef` is already keyed on `(category, name)` with a
+`type` and a `required` flag — so each class already defines its own attributes, managed at
+`/admin/attributes`. Nothing here replaces that. A second parallel taxonomy would split the
+truth about a part across two systems, which is worse than the one that exists.
+
+### N1 — Import can target custom attributes (EDIT the catalog import, rules V1-V5)
+- `CatalogTargetField` gains a dynamic form: besides the ten fixed fields, a mapping target
+  may be `attr:<attributeDefId>`, mapping a source column onto a custom attribute.
+- `GET /catalog-imports/:id/targets` → the mappable targets: the fixed fields plus every
+  `AttributeDef`, each with `{ key, label, category, type, required, options }`, so the
+  mapping UI can group attributes by the class they belong to.
+- Validation resolves each `attr:` target and checks, per row:
+  - the def exists (else INVALID `Unknown attribute target attr:<id>`);
+  - **the def's category matches the row's resolved category** (else INVALID
+    `<label> only applies to <category> parts`) — an attribute belongs to a class, so a
+    sheet-metal thickness must not land on a software part;
+  - the value coerces to the def's `type` (`NUMBER` parses, `BOOLEAN` accepts
+    true/false/yes/no/1/0, `DATE` parses ISO or `YYYY-MM-DD`, `LIST` must be one of
+    `options`), else INVALID naming the field and the expected form.
+- A `required` `AttributeDef` for the row's category with no mapped column and no default is
+  INVALID: importing a part that violates its own class definition is not a favour.
+- Commit writes `PartAttributeValue` rows alongside the part, in the same transaction, so a
+  part never lands with half its attributes.
+- `CatalogMappedRow` gains `attributes: { attributeDefId: number; value: string }[]`.
+
+### N2 — Materials (`src/routes/materials.ts`)
+Models `Material` and `PartMaterial`, enums `MaterialClass` and `MaterialForm`.
+
+`Material` is the raw stock itself: `code` (unique), `name`, `materialClass`,
+`specification` (the controlling spec — `AL 6061-T6`, `ASTM A36`, `PA66-GF30`), `density`
+(g/cm³, so a volume can become a mass), `stockUom` (default `kg`), `unitCost`, `notes`,
+`active`.
+
+`PartMaterial` is what a part is **made from** — deliberately distinct from both `BomLine`
+(which composes *parts*) and `OperationMaterial` (which consumes *parts* at an operation):
+`partId`, `materialId`, `form`, `netQuantity` (what ends up in the finished part, in the
+material's `stockUom`), `scrapFactor` (fraction lost to machining, trim or sprue — gross =
+net × (1 + scrapFactor)), `stockSize` (free text the buyer orders against, e.g.
+`40 × 40 × 220 mm bar`), `notes`. Unique on (`partId`, `materialId`, `form`).
+
+- `GET /materials?search&materialClass&active&page&pageSize` → Paged, name asc, each with
+  `partCount`. `POST /materials` (code `/^[A-Z0-9._-]{2,32}$/i`, unique, 409 on duplicate),
+  `GET/PATCH /materials/:id`, `DELETE /materials/:id` (409 `<code> is used by <n> parts`
+  when referenced — deactivate instead).
+- `GET /parts/:id/materials`, `POST /parts/:id/materials`, `PATCH /part-materials/:id`,
+  `DELETE /part-materials/:id` (204). `netQuantity > 0`; `scrapFactor >= 0 and < 1`, the same
+  rule the mBOM already uses.
+- Attaching material to an `ASSEMBLY` is allowed but reported as a note by N3, not blocked:
+  an assembly's material normally comes from its children, yet adhesives and potting compound
+  are real. Blocking it would make the honest case impossible.
+
+### N3 — Material requirements for the mBOM (`src/routes/materials.ts`)
+The point of the whole addition: **what do we need to buy to build this?**
+
+`GET /revisions/:id/material-requirements?quantity=N` (N default 1, > 0) →
+`MaterialRequirements`:
+- Walks the released BOM tree from this revision using the existing resolved-revision rule
+  and depth cap, accumulating each part's total quantity per build.
+- `materials[]` — one row per `Material`, with `netQuantity`, `grossQuantity`
+  (Σ net × (1 + scrapFactor) × cumulative part quantity × N), `stockUom`, `estimatedCost`
+  (gross × `unitCost`, null when the material has no cost), and `fromParts[]` showing which
+  parts contribute how much, so a surprising total can be traced to its source.
+- `unspecified[]` — parts in the tree with **no** `PartMaterial` that plausibly need one:
+  category `MECHANICAL` or `RAW_MATERIAL`. These are the holes in material planning, and
+  reporting them is as valuable as the totals; a report that silently omits them would read
+  as complete when it is not.
+- `notes[]` — assemblies carrying direct material, and any truncation at the depth cap.
+- Totals rounded to 6 dp before comparison or display, as elsewhere.
+- `GET /revisions/:id/material-requirements/export.csv` for the buyer, reusing the existing
+  CSV cell-escaping helper (which prefixes `'` to cells starting with `=+-@`).
+
+### Frontend — materials
+- `pages/Materials.tsx` at `/materials`: filterable list, create/edit modal, usage count.
+- `PartDetail` gains a **Materials** tab (after mBOM): the part's materials with form, net,
+  scrap %, gross, stock size, inline add/edit. For a `MECHANICAL` part with none, an
+  informational Alert saying material is unspecified and will show as a planning gap —
+  informational, never blocking.
+- `components/part/MaterialRequirementsCard.tsx` on the mBOM tab: a build-quantity input,
+  the totals table with estimated cost, the unspecified-parts warning, and a CSV export.
+- Sidebar entry Materials (`/materials`, `ExperimentOutlined`); extend `selectedKey`.
+
+## Document vault — check-out, check-in and locking
+
+Right now two engineers can upload versions of the same document minutes apart and the second
+silently wins. That is the gap Upchain closes with a vault, and it is the reason CAD-managed
+PLM insists on check-out before edit.
+
+Models: `Document` gains `lockedById`, `lockedAt`, `lockExpiresAt`, `lockNote`. A lock lives on
+the **document**, not a version — you reserve the right to produce the next version.
+
+### D1 — Taking and releasing a lock (`src/routes/documents.ts`)
+- `POST /documents/:id/checkout {note?}` → `DocumentDetail`. 409
+  `<docNumber> is checked out by <name>` when someone else holds it. Re-checking out your own
+  lock is idempotent and refreshes the expiry rather than erroring — a user who lost their tab
+  should not be stuck.
+- `POST /documents/:id/checkin` (multipart `file`, `note?`) → creates the next version **and**
+  releases the lock, in one transaction: a check-in that stored the file but left the lock
+  held would be worse than either outcome alone. 409 `<docNumber> is not checked out by you`.
+- `POST /documents/:id/cancel-checkout` → releases without a version. The holder, or an ADMIN.
+- Locks expire after 7 days (`lockExpiresAt`). An **expired** lock may be taken by anyone; the
+  response says whose lock was broken so it is never silent.
+- `POST /documents/:id/break-lock {reason}` → ADMIN only, `reason` required, works on a live
+  lock. Every one of these five actions is recorded by the existing audit middleware, and the
+  reason is stored in `lockNote` so the trail explains itself.
+
+### D2 — Vault discipline
+- `POST /documents/:id/versions` (the existing direct upload) now **requires** the caller to
+  hold the lock: 409 `Check out <docNumber> before uploading a new version`. This is a
+  deliberate behaviour change and the whole point of the feature — without it the lock is
+  decorative.
+- Deleting a document requires no lock (it is not an edit of content) but is refused while
+  someone else holds one: 409, so a delete cannot yank a file from under an editor.
+- `DocumentDetail` gains `lock: { user, lockedAt, expiresAt, note, isMine, expired } | null`,
+  so the UI can show state without a second call.
+
+### D3 — Frontend
+- `DocumentDetail`: a lock bar — "Check out" when free; "Check in" + "Cancel check-out" when
+  mine; "Checked out by <name> since <date>" plus "Break lock" for an admin when someone
+  else's. The upload control is disabled with the reason as a tooltip when the lock is not
+  mine, rather than failing after the file is chosen.
+- `DocumentsList` shows a lock column so a vault-wide view of who is holding what exists.
+
+## Design review markup
+
+Comment on a specific place in a model or drawing, discuss it, resolve it, and turn it into a
+change request when it is real. This is Aras Visual Collaboration's job and Upchain's markup,
+and it is the natural payoff for the CAD viewer and cBOM work already done.
+
+Models `Markup` and `MarkupComment`; enums `MarkupKind` (`PIN_3D` | `BOX_2D` | `POINT_2D` |
+`NOTE`) and `MarkupStatus` (`OPEN` | `RESOLVED` | `WONT_FIX`).
+
+### K1 — Anchoring a markup
+- A markup belongs to a `DocumentVersion`, never to a document: a comment about geometry is
+  about *that* geometry, and must not silently follow a new upload.
+- `geometry` is JSON whose shape depends on `kind`, and the contract fixes it:
+  - `PIN_3D` — `{ point: [x,y,z], camera: { position: [x,y,z], target: [x,y,z] } }`. The
+    camera is stored so "look at what I was looking at" actually works.
+  - `BOX_2D` / `POINT_2D` — `{ page: number, x: number, y: number, w?: number, h?: number }`
+    in **normalized 0–1 coordinates**, so a markup survives a zoom, a different screen and a
+    re-render at another size.
+  - `NOTE` — `{}`; a version-level remark with no position.
+- 400 when geometry does not match the kind, naming the missing key. Out-of-range normalized
+  coordinates are 400, not clamped: silently moving someone's markup is worse than refusing it.
+
+### K2 — Endpoints (`src/routes/markup.ts`)
+- `GET /document-versions/:id/markups?status=` → `MarkupDetail[]`, oldest first, each with its
+  comment thread.
+- `POST /document-versions/:id/markups {kind, geometry, body, page?}` → 201. `body` is the
+  opening comment and is required — an anchor with nothing said is noise.
+- `PATCH /markups/:id` (geometry and body of the opening comment, author or ADMIN only),
+  `DELETE /markups/:id` (author or ADMIN; deletes its thread).
+- `POST /markups/:id/comments {body}` → 201 `MarkupCommentDto`. Any write-role user.
+- `POST /markups/:id/transition {action}` — `resolve` OPEN→RESOLVED, `wont-fix`
+  OPEN→WONT_FIX, `reopen` from either back to OPEN. Records `resolvedById`/`resolvedAt`.
+  Conditional update + 409 on concurrent change.
+- `POST /markups/:id/escalate` → creates an `Ecr` from the markup (title from the opening
+  comment, description carrying the thread and a link back), links it via `Markup.ecrId`, and
+  409s if it already has one. This is the path from "that hole is in the wrong place" to a
+  governed change.
+- `GET /my-markups` → markups the caller opened or commented on that are still OPEN, so a
+  reviewer can find their own open points.
+
+### K3 — Notifications
+Commenting notifies the markup author and every prior commenter except the actor; resolving
+notifies the author. Reuses the existing outbox (`notifyUsers`), types `MARKUP_COMMENTED` and
+`MARKUP_RESOLVED`.
+
+### K4 — Frontend
+- `components/cad/MarkupLayer.tsx` — a self-contained overlay taking
+  `{ documentVersionId, kind, readOnly }`. It renders existing markups, places new ones on
+  click, and shows the thread in a side panel. It must **not** modify `CadViewer`'s own
+  behaviour when no markup is active.
+- `components/DocumentMarkupPanel.tsx` — the composed unit (viewer + layer + thread list) that
+  the caller drops into `DocumentDetail`. Exported self-contained so the page owner and the
+  markup owner do not edit the same file.
+- Resolved markups render muted and are hidden behind a "show resolved" toggle, because an
+  old review should not clutter a current one.
+
+## Service and as-maintained records
+
+A shipped unit keeps changing: parts get replaced, upgrades get installed. The as-built record
+says what left the factory; the as-maintained record says what is in the field now. This
+extends the serial/lot work rather than duplicating it.
+
+Models `ServiceRecord` and `ServicePartSwap`; enums `ServiceKind` (`REPAIR` | `UPGRADE` |
+`INSPECTION` | `WARRANTY_CLAIM` | `DECOMMISSION`) and `ServiceStatus` (`OPEN` |
+`IN_PROGRESS` | `CLOSED` | `CANCELLED`).
+
+### G1 — Records
+- A `ServiceRecord` is against a `BuildUnit` — only one with status SHIPPED or COMPLETED (409
+  otherwise: you do not service something that was never finished).
+- Fields: `serviceNumber` (`SVC-10001`, scan-max **through `withNumberLock`**), `buildUnitId`,
+  `kind`, `status`, `title`, `description`, `reportedAt`, `closedAt`, `technicianId`,
+  `ncrId?` (a field failure is often a nonconformance), `ecnId?` (an upgrade usually
+  implements a change).
+- `GET /service-records?buildUnitId&status&kind&search&page&pageSize`, `POST`, `GET/PATCH /:id`
+  (PATCH refused once CLOSED), `POST /:id/transition {start|close|cancel|reopen}`.
+
+### G2 — Part swaps: the as-maintained delta
+- `ServicePartSwap`: `serviceRecordId`, `removedUnitId?`, `installedUnitId?`, `position?`
+  (free text, e.g. "left motor"), `reason`. At least one of removed/installed is required
+  (400) — a swap that neither removes nor installs anything is not an event.
+- Rules: the removed unit must currently be inside the serviced unit's genealogy (409
+  `<identifier> is not part of <serviced>`); the installed unit must be COMPLETED and not
+  already consumed elsewhere, reusing the rule U3 single-parent check.
+- Committing a swap **rewrites the as-built graph**: the removed unit's `AsBuiltLine` is
+  deleted and the installed unit's created, under the same
+  `pg_advisory_xact_lock(hashtext('turboplm-as-built'))` rule U3 uses. Doing it any other way
+  would let genealogy and service history disagree, and then neither can be trusted.
+- The removed unit is written off only when the request says so: `scrapRemoved` (boolean,
+  default false). **Never inferred from `reason`.** Inferring it from prose scrapped working
+  hardware on the standard phrasing "removed for bench test, no fault found" — SCRAPPED has no
+  way back through the API, so a keyword match became permanent data loss. Otherwise the unit
+  stays COMPLETED and, its as-built line now gone, is free to be installed elsewhere.
+- Deleting a swap undoes **only what that swap did**: it un-scraps the removed unit only when
+  that swap set `scrapRemoved`, so hardware written off independently afterwards is not
+  resurrected. The restore also re-checks rule U3's consumable set, or it could re-create an
+  edge whose child is IN_PROGRESS.
+
+### G3 — As-maintained view
+- `GET /build-units/:id/as-maintained` → the genealogy **as it stands now** plus
+  `changes[]`: every swap that has touched this unit, newest first, with the service record,
+  what came out, what went in and when. The existing `/genealogy` endpoint already returns
+  current state; this one adds the history that explains how it got there.
+- `GET /build-units/:id/service-history` → the unit's service records with their swaps.
+
+### G4 — Frontend
+- `pages/ServiceRecords.tsx` at `/service`, `pages/ServiceRecordDetail.tsx` at
+  `/service/:id` (header, status bar, swaps table with an add-swap modal using searchable unit
+  pickers, links to the NCR and ECN).
+- `BuildUnitDetail` gains an **As maintained** section: the current genealogy with a change
+  log beneath it, and a "Raise service record" action.
+- Sidebar entry Service (`/service`, `ToolOutlined`).
+
+## Item-level access control
+
+The one architectural gap. Everything else so far has been additive; this changes what **every
+read path** returns. A missed route is a data leak, not a cosmetic bug, so the rules below are
+deliberately conservative and the verification requirement is part of the contract rather than
+an afterthought.
+
+Earlier work (rule A7) deliberately scoped this out and said so in the UI. That statement must
+be removed as part of this change — a permission model users half-believe in is worse than none.
+
+Models `AccessGroup`, `AccessGroupMember`, `ItemAcl`; enums `AclEntityType` (`PART` |
+`DOCUMENT` | `ECN` | `PROJECT` | `BUILD_UNIT`) and `AclPermission` (`READ` | `WRITE`).
+
+### X1 — The model
+- `AccessGroup`: `name` (unique), `description`, `active`. `AccessGroupMember`:
+  (`groupId`, `userId`) unique.
+- `ItemAcl`: `entityType`, `entityId`, exactly one of `groupId` / `userId`, `permission`,
+  `grantedById`, `grantedAt`. Unique on (`entityType`, `entityId`, `groupId`, `userId`).
+- **Opt-in, exactly like signatures.** An item with **no** `ItemAcl` rows is readable and
+  writable by everyone the existing role rules already allow. The instant it has one row, only
+  the listed principals qualify. This is the only migration story that does not break a running
+  install on deploy.
+- A global `ADMIN` always passes, read and write. Otherwise no permission model can be
+  recovered from once someone locks themselves out of an item.
+- `WRITE` implies `READ`. A principal granted WRITE need not also be granted READ.
+
+### X2 — One enforcement point (`src/lib/acl.ts`)
+Enforcement must not be re-implemented per route. This module is the only place the rules live:
+- `aclFilter(entityType, user)` → a Prisma `where` fragment restricting a query to visible
+  ids. It must express "no ACL rows exist for this item **OR** the user is listed", which is
+  `{ OR: [{ acls: { none: {} } }, { acls: { some: <principal> } }] }` — so every ACL-bearing
+  model carries an `acls` relation and the filter is a relation filter, not an id list. An id
+  list would not survive a table of any size.
+- `assertCanRead(entityType, id, user)` → throws **404**, never 403: a 403 confirms the item
+  exists, which is the leak the whole feature exists to prevent. Same rule the supplier portal
+  already follows.
+- `assertCanWrite(entityType, id, user)` → 404 when not readable, 403 `You do not have write
+  access to this <type>` when readable but read-only.
+- `visibleIds(entityType, ids, user)` → the subset of a given set that is visible, for
+  redacting traversals in bulk without N queries.
+
+### X3 — Where it is applied
+Every list endpoint for an ACL-bearing type applies `aclFilter`. Every detail, update and
+delete endpoint calls `assertCanRead`/`assertCanWrite` **before** any other validation, so an
+error message cannot reveal an item's contents. This covers, at minimum: parts and revisions,
+documents and versions, ECNs and items, projects, build units — and every nested read that
+returns one of them (BOM lines, where-used, ECN impact, genealogy, deviations, baselines,
+search, dashboards, analytics, exports).
+
+### X4 — Traversals: redact, never omit
+A BOM containing a part the caller cannot see is the hard case. Omitting the line is a lie
+about the structure — quantities would not add up and a cost roll-up would silently
+under-report. So a hidden child is returned as a **redacted node**: `{ redacted: true, id:
+null, partNumber: 'Restricted', name: 'Restricted', … }` keeping find number and quantity.
+The caller learns that something is there and how much of it, but nothing about what it is.
+The same rule applies to genealogy, where-used and the deviation report.
+
+Roll-ups (cost, material requirements) must report `redactedCount` when any contributor was
+hidden, so a total is never presented as complete when it is not.
+
+### X5 — Search, notifications and exports
+- Global search filters every group through `aclFilter`. A restricted item must not appear as
+  a search hit, which is the most commonly missed leak.
+- A notification whose `link` points at an item the recipient can no longer read is still
+  listed (it is their history) but its link is nulled rather than 404ing on click.
+- CSV and report exports apply the same filter and redaction as the screen they mirror.
+
+### X6 — Administration
+- `GET/POST /access-groups`, `PATCH/DELETE /access-groups/:id` (ADMIN only; delete refused
+  while the group holds any ACL, 409 naming the count).
+- `GET/POST /access-groups/:id/members`, `DELETE /access-group-members/:id`.
+- `GET /:entityType/:id/acl` → the item's grants, `POST` to add, `DELETE /item-acls/:id`.
+  Managing an item's ACL requires WRITE on that item, or ADMIN — otherwise a user with write
+  access could not delegate, and only an admin could ever share anything.
+- The UI must show, on any restricted item, who can see it, and warn before the **first** grant
+  is added that doing so restricts the item to that list.
+
+### X7 — Verification is part of the feature
+A permission bug is invisible until it is exploited, so this rule is not optional:
+- A test file `tests/acl.test.ts` must **enumerate the router stack** at runtime and assert
+  that every registered `GET` route either applies the filter or is on an explicit, commented
+  allow-list of genuinely public endpoints. A hand-written list of routes to check will drift;
+  reading the stack cannot.
+- For each ACL-bearing type: a restricted item is absent from the list endpoint, 404s on
+  detail, 404s in search, is redacted in every traversal that reaches it, and is invisible in
+  exports — asserted for a user in no group, a user in a granted group, and a global admin.
+- The A7 boundary note must be deleted from `CONTRACTS.md` and from any UI copy that repeats
+  it, in the same change that makes it untrue.
+
 ## Seed data (backend/src/seed.ts)
 
 Idempotent: exit early if any Part exists. Users: `demo@turboplm.local` / `demo1234`

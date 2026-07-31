@@ -23,5 +23,25 @@ docker run --rm --network edge \
 Set `TOUR_BASE` to point at a different instance (defaults to
 `https://demo.turboplm.com`).
 
-A read-only account is sufficient and preferable: the script only navigates, but
-a viewer account guarantees the recording cannot alter data.
+Any account on the instance works. The script only navigates, opens tabs and
+scrolls — it never submits a form. A read-only account is therefore fine and
+slightly preferable: `seed.ts` creates `viewer@turboplm.local`, alongside
+`demo@turboplm.local` (engineer) and `admin@turboplm.local` (admin).
+
+One caveat if you record as the viewer: item-level access is enforced per
+account, so anything restricted to a group the viewer is not in — the seeded
+`PAY-6001` among them — is invisible, and the access beat will be skipped. Record
+as the engineer to capture that scene.
+
+Every subject is discovered at runtime from the list page that leads to it, so
+nothing has to exist for the recording to succeed — a caption whose content the
+page cannot show is skipped, and the skipped titles are printed at the end. Four
+optional variables pin a specific fixture when you have one; each falls back to
+list discovery:
+
+| Variable | Pins |
+| --- | --- |
+| `TOUR_TOP_PART` | part id whose eBOM has a level below its own children |
+| `TOUR_CAD_DOC` | document id whose latest version is a STEP / IGES / BREP file |
+| `TOUR_SIGNED_ECN` | ECN id carrying at least one executed signature |
+| `TOUR_TRACE_UNIT` | build unit id — a lot — that ended up inside shipped units |

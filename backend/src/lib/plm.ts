@@ -1,4 +1,4 @@
-import { Lifecycle, PartRevision } from '@prisma/client';
+import { Lifecycle, Prisma, PartRevision } from '@prisma/client';
 import { prisma } from './prisma';
 
 /**
@@ -30,12 +30,42 @@ export function nextRevisionLabel(current: string): string {
  * collide with user-chosen numbers); concurrent creates are handled by the
  * caller retrying on a unique-constraint violation.
  */
-export async function generatePartNumber(): Promise<string> {
-  const rows = await prisma.$queryRaw<{ max: number | null }[]>`
+export async function generatePartNumber(db: Prisma.TransactionClient = prisma): Promise<string> {
+  // The scan must run on the caller's transaction client: parts created earlier in an
+  // open transaction are invisible from outside it, so a shared connection would hand
+  // out the same number twice.
+  const rows = await db.$queryRaw<{ max: number | null }[]>`
     SELECT MAX(SUBSTRING("partNumber" FROM 3)::int) AS max
     FROM "Part"
     WHERE "partNumber" ~ '^P-[0-9]{1,9}$'`;
   return `P-${Math.max(rows[0]?.max ?? 0, 10000) + 1}`;
+}
+
+
+/**
+ * Serialize scan-max number allocation across concurrent requests.
+ *
+ * Every generator in this codebase reads `MAX(<number>)` and then inserts. With no lock,
+ * concurrent callers all read the same maximum, all but one hit the unique constraint, and
+ * the bounded retry runs out — so a burst of creates returns spurious 409s even though
+ * uniqueness itself is never violated. Serializing allocation with the same advisory-lock
+ * pattern BOM structure and ECN membership writes already use makes the retry a backstop
+ * rather than the mechanism.
+ *
+ * The lock is transaction-scoped, so it releases on commit or rollback.
+ */
+export async function withNumberLock<T>(
+  fn: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('turboplm-numbering'))::text`;
+    return fn(tx);
+  });
+}
+
+/** Take the same lock inside a transaction the caller already opened. */
+export async function lockNumbering(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('turboplm-numbering'))::text`;
 }
 
 /**

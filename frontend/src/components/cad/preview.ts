@@ -34,3 +34,10 @@ export function previewKind(fileName: string): PreviewKind {
 export function isPreviewable(fileName: string): boolean {
   return previewKind(fileName) !== 'unsupported';
 }
+
+/** Formats the CAD service can tessellate into a glTF derivative server-side. */
+const CONVERTIBLE_EXTENSIONS = new Set(['step', 'stp', 'iges', 'igs', 'brep', 'brp']);
+
+export function isConvertible(fileName: string): boolean {
+  return CONVERTIBLE_EXTENSIONS.has(fileExtension(fileName));
+}

@@ -10,6 +10,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter } from '../lib/acl';
 import { requireAdmin } from '../middleware/rbac';
 import { notifyUsers } from '../lib/notify';
 
@@ -151,6 +152,11 @@ async function getWorkflowDetailOrThrow(id: number): Promise<EcnWorkflowDto> {
 function currentUserId(req: Request): number {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
   return req.user.id;
+}
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
 }
 
 function requireBody(req: Request): Record<string, unknown> {
@@ -556,13 +562,19 @@ router.get(
   '/ecns/:id/workflow',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    // Scoped by the ECN's read filter: a workflow on a restricted ECN answers exactly like a
+    // workflow on a missing one (rule X2).
+    const user = aclUser(req);
+    const ecn = await prisma.ecn.findFirst({
+      where: { id, ...(aclFilter('ECN', user) as Prisma.EcnWhereInput) },
+      select: { id: true },
+    });
+    if (!ecn) throw new HttpError(404, 'ECN not found');
     const workflow = await prisma.ecnWorkflow.findUnique({
       where: { ecnId: id },
       include: workflowInclude,
     });
     if (!workflow) {
-      const ecn = await prisma.ecn.findUnique({ where: { id }, select: { id: true } });
-      if (!ecn) throw new HttpError(404, 'ECN not found');
       res.json(null);
       return;
     }
@@ -588,8 +600,10 @@ router.post(
     const comment =
       body.comment === undefined ? undefined : optionalNullableText(body.comment, 'comment');
 
-    const task = await prisma.workflowTask.findUnique({
-      where: { id },
+    // Scoped through the ECN: an assigned approver who cannot read the (restricted) change
+    // can no longer decide it — deciding what one cannot read is worse than stalling.
+    const task = await prisma.workflowTask.findFirst({
+      where: { id, workflow: { ecn: aclFilter('ECN', aclUser(req)) as Prisma.EcnWhereInput } },
       include: {
         workflow: {
           include: {

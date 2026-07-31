@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>TurboPLM — Self-hosted Product Lifecycle Management</title>
-<meta name="description" content="Open, self-hosted PLM: product structure, multi-level BOM, part revisioning, manufacturing processes and full engineering change control. Runs on your own hardware in Docker." />
+<meta name="description" content="Open, self-hosted PLM: product structure, multi-level BOM, part revisioning, manufacturing processes, engineering change control, serial and lot traceability, and item-level access control. Runs on your own hardware in Docker." />
 <meta property="og:title" content="TurboPLM — Self-hosted Product Lifecycle Management" />
-<meta property="og:description" content="Product structure, BOM, revisioning and engineering change control — on your own hardware." />
+<meta property="og:description" content="Product structure, BOM, revisioning, change control and as-built traceability — on your own hardware." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://turboplm.com" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
@@ -69,8 +69,6 @@
   .hero .lede{font-size:1.18rem;max-width:66ch}
   .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
   .hero-note{margin-top:18px;font-size:.9rem;color:var(--muted)}
-  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}
-  .badge{font-size:.78rem;padding:4px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600}
 
   /* product mock */
   .mock{margin-top:52px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--bg);box-shadow:0 18px 44px rgba(9,20,38,.10)}
@@ -82,6 +80,11 @@
   .mock-side b{color:#fff;font-size:.9rem;padding:6px 10px 12px;display:flex;align-items:center;gap:8px}
   .mock-side span{color:#9fb3cd;font-size:.82rem;padding:7px 10px;border-radius:7px}
   .mock-side span.on{background:var(--accent);color:#fff;font-weight:600}
+  /* grouped nav: a parent row carries a caret, children sit indented under it */
+  .mock-side span.grp{display:flex;align-items:center;justify-content:space-between}
+  .mock-side span.grp::after{content:"⌄";font-size:.7rem;opacity:.65}
+  .mock-side span.grp.open::after{content:"⌃"}
+  .mock-side span.sub{padding-left:24px;font-size:.79rem}
   .mock-main{padding:20px 22px;overflow:hidden}
   .mock-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
   .mock-h strong{font-size:1.02rem}
@@ -108,6 +111,12 @@
   .g4{grid-template-columns:repeat(auto-fit,minmax(228px,1fr))}
   .card{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:var(--bg)}
   .card p{color:var(--muted);font-size:.93rem;margin:0}
+  /* capability group heading: enough separation to scan by area, not a full section break */
+  .cap-group{margin-top:46px}
+  .cap-group:first-of-type{margin-top:30px}
+  .cap-group > h3{font-size:.82rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
+    font-weight:700;margin:0;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .cap-group .grid{margin-top:18px}
   .ico{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:13px;font-size:17px}
   ul.check{list-style:none;padding:0;margin:0}
   ul.check li{position:relative;padding-left:26px;margin-bottom:9px;color:var(--muted);font-size:.94rem}
@@ -119,9 +128,6 @@
   .creds div{white-space:nowrap}
 
   /* stack */
-  .stack{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
-  .chip{border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:.86rem;color:var(--muted);background:var(--bg)}
-  .chip b{color:var(--text);font-weight:600}
 
   footer{background:var(--bg-deep);color:#9fb3cd;padding:52px 0 34px;border-top:1px solid var(--line)}
   footer h4{color:#fff;font-size:.86rem;text-transform:uppercase;letter-spacing:.07em;margin:0 0 12px}
@@ -137,14 +143,14 @@
   <div class="wrap nav">
     <a class="brand" href="#top"><span class="mark">T</span> TurboPLM</a>
     <nav class="nav-links">
-      <a href="#tour">Watch the tour</a>
+      <a href="#tour">Tour</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#change">Change control</a>
+      <a href="#access">Access</a>
       <a href="#demo">Live demo</a>
       <a href="#selfhosted">Self-hosted</a>
       <a href="#consulting">Consulting</a>
     </nav>
-    <a class="btn btn-primary btn-sm" href="https://github.com/horatiumm-creator/turboplm">View on GitHub</a>
   </div>
 </header>
 
@@ -157,21 +163,14 @@
     <p class="lede">
       TurboPLM manages the things a hardware team actually lives in: the part master, the
       multi-level bill of materials, revisions and their lifecycles, manufacturing
-      processes, and the engineering change control that keeps all of it honest.
-      It runs on your own hardware, in Docker, with one command.
+      processes, and the engineering change control that keeps all of it honest — then
+      follows the product past release, into what was built and what came back from the
+      field. It runs on your own hardware, in Docker, with one command.
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/horatiumm-creator/turboplm">View on GitHub</a>
-      <a class="btn btn-ghost" href="#demo">Try the live demo</a>
+      <a class="btn btn-primary" href="#demo">Try the live demo</a>
       <a class="btn btn-ghost" href="#consulting">Get expert help</a>
     </div>
-    <div class="badges">
-      <span class="badge">Docker Compose</span>
-      <span class="badge">Postgres</span>
-      <span class="badge">No vendor lock-in</span>
-      <span class="badge">FSL-1.1-MIT</span>
-    </div>
-
     <div class="mock" aria-label="Illustration of the TurboPLM bill-of-materials view">
       <div class="mock-bar">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
@@ -182,20 +181,30 @@
           <b><span class="mark" style="width:20px;height:20px;font-size:11px;border-radius:6px">T</span> TurboPLM</b>
           <span>Dashboard</span>
           <span>My Work</span>
-          <span class="on">Parts</span>
-          <span>Changes</span>
-          <span>Requirements</span>
-          <span>BOM Compare</span>
-          <span>Quality</span>
+          <span class="grp open">Product</span>
+          <span class="sub on">Parts</span>
+          <span class="sub">Documents</span>
+          <span class="sub">Requirements</span>
+          <span class="sub">Materials</span>
+          <span class="sub">BOM Compare</span>
+          <span class="sub">Baselines</span>
+          <span class="grp">Changes</span>
+          <span class="grp">Manufacturing</span>
+          <span class="grp">Sourcing</span>
           <span>Projects</span>
+          <span class="grp">Insights</span>
         </div>
         <div class="mock-main">
           <div class="mock-h">
             <strong>DRN-1000 — TurboDrone X1 Quadcopter</strong>
             <span class="tag asm">Assembly</span>
-            <span class="tag rel">Released</span>
+            <span class="tag wip">In Work</span>
           </div>
-          <div style="font-size:.8rem;color:var(--muted)">Revision A · bill of materials</div>
+          <!-- Revision B deliberately: it is the only state in which an In Work child (the new
+               LED set) can appear, because the release gate refuses to release a parent whose
+               child has no released revision. A mock showing that combination as Released would
+               contradict the rule this same page sells. -->
+          <div style="font-size:.8rem;color:var(--muted)">Revision B · bill of materials</div>
           <table class="bom">
             <thead>
               <tr><th>Part</th><th class="hide-s">Find</th><th>Qty</th><th>Rev</th><th class="hide-s">State</th></tr>
@@ -221,9 +230,16 @@
     <div class="eyebrow">Product tour</div>
     <h2>See it in action</h2>
     <p class="lede">
-      Under two minutes through the real application — the part master, a four-level bill
-      of materials, a structure comparison, a change notice with its dispositions, CAD in
-      the browser, requirements and analytics. No narration; captions carry it.
+      Under three minutes through the real application — the part master, a four-level bill
+      of materials, a structure comparison, a change notice with its dispositions and
+      signatures, CAD in the browser, the CAD BOM reconciled against engineering, serial and
+      lot traceability, and the analytics over the top. No narration; captions carry it.
+    </p>
+    <p style="font-size:.88rem;color:var(--muted);margin-top:-4px">
+      Recorded before the most recent additions, so materials planning, the document vault,
+      redline review and item-level access are not in this cut — the
+      <a href="#capabilities">capabilities</a> above and the
+      <a href="#demo">live demo</a> below cover them.
     </p>
     <div class="video-wrap">
       <video controls preload="metadata" poster="poster.jpg" playsinline>
@@ -240,51 +256,154 @@
     <div class="eyebrow">Capabilities</div>
     <h2>Everything a product record needs</h2>
     <p class="lede">Not a document dump with a parts list bolted on — a real product data model with the rules enforced on the server.</p>
-    <div class="grid g3">
-      <div class="card">
-        <div class="ico">◫</div>
-        <h3>Parts &amp; revisions</h3>
-        <p>Lettered revisions with a lifecycle state machine — In Work, In Review, Released, Obsolete. Released revisions are immutable, enforced server-side, not by convention.</p>
+
+    <div class="cap-group">
+      <h3>Product structure</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">◫</div>
+          <h3>Parts &amp; revisions</h3>
+          <p>Lettered revisions with a lifecycle state machine — In Work, In Review, Released, Obsolete. Released revisions are immutable, enforced server-side, not by convention.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌗</div>
+          <h3>Multi-level eBOM</h3>
+          <p>Find numbers, quantities, units, reference designators, an indented structure tree, cycle prevention and where-used. Children resolve to their latest released revision — and a child that has none is shown at its working revision and flagged unreleased, rather than quietly omitted.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇄</div>
+          <h3>BOM compare &amp; baselines</h3>
+          <p>Diff any two revisions — or two entirely different products — as one aligned tree. Freeze a structure as a named baseline and compare baselines to each other.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◇</div>
+          <h3>Effectivity, alternates, variants</h3>
+          <p>Date-effective BOM lines with an “as of” view, substitute parts per line, and option-driven variants resolved by a configurator.</p>
+        </div>
+        <div class="card">
+          <div class="ico">≡</div>
+          <h3>Requirements traceability</h3>
+          <p>Typed requirements with decomposition, linked to the parts that satisfy them and the documents that verify them, plus a coverage matrix.</p>
+        </div>
       </div>
-      <div class="card">
-        <div class="ico">⌗</div>
-        <h3>Multi-level eBOM</h3>
-        <p>Find numbers, quantities, units, reference designators, an indented structure tree, cycle prevention and where-used. Children resolve to their latest released revision.</p>
+    </div>
+
+    <div class="cap-group">
+      <h3>Documents &amp; CAD</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">◈</div>
+          <h3>Versioned documents</h3>
+          <p>Every upload is a new version, never an overwrite, linked to the parts, revisions and changes it belongs to. The whole history stays downloadable.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⊙</div>
+          <h3>The vault: check out, check in</h3>
+          <p>Take the lock before you edit and nobody else can upload over you. Locks show who holds them and expire on their own, so a colleague on holiday never blocks the drawing.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◉</div>
+          <h3>3D CAD in the browser</h3>
+          <p>STEP, IGES and BREP tessellated server-side by an OpenCascade kernel, plus STL, glTF, OBJ and 3MF — orbit and inspect an assembly with no plugin and no desktop licence.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✎</div>
+          <h3>Redline markup &amp; review</h3>
+          <p>Pin a comment to a point on a 3D model or an image and thread the discussion there; PDFs and other formats take document-level notes. When a redline turns out to be a real change, escalate it into a change request that carries the whole thread with it.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◫</div>
+          <h3>cBOM from CAD</h3>
+          <p>Read the assembly structure straight out of a STEP file, match products to parts, and reconcile all three views: what was modelled, what engineering released, and what manufacturing consumes.</p>
+        </div>
       </div>
-      <div class="card">
-        <div class="ico">⚙</div>
-        <h3>Manufacturing processes</h3>
-        <p>Per-revision routings: sequenced operations with work centers and setup/run times, each consuming materials — the mBOM alongside the engineering one.</p>
+    </div>
+
+    <div class="cap-group">
+      <h3>Manufacturing &amp; the floor</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">⚙</div>
+          <h3>Process plans (mBOM)</h3>
+          <p>Per-revision routings: sequenced operations with work centers and setup/run times, each consuming materials — the mBOM alongside the engineering one, reconciled against it.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⬡</div>
+          <h3>Materials &amp; what to buy</h3>
+          <p>Declare the stock a machined part draws — alloy, form, net quantity, scrap factor. Explode a build of any quantity into gross material totals and estimated cost, with the parts that declare <em>no</em> material listed just as loudly, because those are the holes you would otherwise order against.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌗</div>
+          <h3>Serial &amp; lot traceability</h3>
+          <p>Record what was actually built, not just what was designed. Ask which shipped serial numbers contain a suspect lot and get the list, with the chain of consumptions that put it there — plus an as-built versus as-designed report showing every substitution and unplanned draw.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⚒</div>
+          <h3>Service &amp; as-maintained</h3>
+          <p>A unit in the field is not the unit you shipped. Book a repair against a serial number, record the part that came out and the one that went in, and the genealogy updates — so the as-maintained structure stays true years after release.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌸</div>
+          <h3>Quality: NCR &amp; CAPA</h3>
+          <p>Nonconformances with severity, quantity and disposition that escalate straight into a change, and CAPAs whose Verify step refuses to advance without a root cause and a corrective action, and whose Close step refuses while any linked nonconformance is still open.</p>
+        </div>
       </div>
-      <div class="card">
-        <div class="ico">⇄</div>
-        <h3>BOM compare &amp; baselines</h3>
-        <p>Diff any two revisions — or two entirely different products — as one aligned tree. Freeze a structure as a named baseline and compare baselines to each other.</p>
+    </div>
+
+    <div class="cap-group">
+      <h3>Change, approval &amp; access</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">⟳</div>
+          <h3>Engineering change control</h3>
+          <p>Requests triaged into change notices, affected items with from → to revisions and stock dispositions, effectivity by date or by serial number, and a printable notice for the floor. <a href="#change">The rules it enforces →</a></p>
+        </div>
+        <div class="card">
+          <div class="ico">✓</div>
+          <h3>Electronic signatures</h3>
+          <p>Signature requirements per role or named signer, password re-entry at the moment of signing, and a printable record carrying printed name, meaning and timestamp. The authentication method is recorded on every signature, so the strength of each one stays auditable. Change what a signer attested to — the affected items, their revisions, their dispositions — and the signature voids itself.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⊘</div>
+          <h3>Item-level access control</h3>
+          <p>Restrict an individual part, document, change, project or build unit to named people and groups. A restricted item answers exactly like one that does not exist — absent from lists, absent from search, and a plain 404 on a direct hit, because a “forbidden” reply already tells an outsider it is there.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◐</div>
+          <h3>Redaction that keeps the maths honest</h3>
+          <p>A restricted child on a BOM you <em>can</em> read stays as a Restricted row with its quantity intact — never silently dropped. Roll-ups say so when a total could not be completed, so no one mistakes a censored number for a small one.</p>
+        </div>
+        <div class="card">
+          <div class="ico">▤</div>
+          <h3>Projects &amp; phase gates</h3>
+          <p>Projects with an ordered gate set and deliverables bound to parts, documents, requirements or changes. A gate refuses to pass while an earlier gate is open or a required deliverable is outstanding.</p>
+        </div>
       </div>
-      <div class="card">
-        <div class="ico">◇</div>
-        <h3>Effectivity, alternates, variants</h3>
-        <p>Date-effective BOM lines with an “as of” view, substitute parts per line, and option-driven variants resolved by a configurator.</p>
-      </div>
-      <div class="card">
-        <div class="ico">◈</div>
-        <h3>CAD &amp; documents</h3>
-        <p>Versioned documents linked to parts, revisions and changes, with in-browser 3D viewing of STEP, IGES, BREP, STL and glTF — converted server-side for instant loading.</p>
-      </div>
-      <div class="card">
-        <div class="ico">≡</div>
-        <h3>Requirements traceability</h3>
-        <p>Typed requirements with decomposition, linked to the parts that satisfy them and the documents that verify them, plus a coverage matrix.</p>
-      </div>
-      <div class="card">
-        <div class="ico">$</div>
-        <h3>Cost &amp; sourcing</h3>
-        <p>Unit costs rolled up through the BOM, approved manufacturer lists per part, and supplier RFQs with quote comparison and award tracking.</p>
-      </div>
-      <div class="card">
-        <div class="ico">⌸</div>
-        <h3>Quality &amp; projects</h3>
-        <p>Nonconformances that escalate straight into a change, CAPAs with root-cause discipline, and phase-gate projects whose gates refuse to pass on open deliverables.</p>
+    </div>
+
+    <div class="cap-group">
+      <h3>Sourcing &amp; cost</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">$</div>
+          <h3>Cost roll-up</h3>
+          <p>Unit costs rolled through the multi-level BOM, with the parts whose cost is unknown named rather than quietly counted as zero.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌾</div>
+          <h3>AML &amp; supplier RFQ</h3>
+          <p>Approved manufacturer lists per part, then RFQs with quote comparison, lead time, MOQ, automatic lowest-price flagging and award tracking.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇄</div>
+          <h3>Supplier portal</h3>
+          <p>Invite a supplier to quote and they get their own scoped login. They see the lines and their own prices — never a competitor's price, never who won, never an RFQ they weren't invited to.</p>
+        </div>
+        <div class="card">
+          <div class="ico">↧</div>
+          <h3>Vendor catalog import</h3>
+          <p>Drop in a distributor's CSV export — Digi-Key, Mouser, Farnell/Newark and RS Components are recognised from their column headers alone — map the columns once, and see every row classified as new, an update or a problem <em>before</em> anything is written. A careless import is how a part master fills with duplicates.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -304,7 +423,8 @@
         <h3>A complete change chain</h3>
         <ul class="check">
           <li>Requests (ECR) raised against a part, triaged and accepted into a change notice</li>
-          <li>Change notices (ECN) carrying affected items, from → to revisions and effectivity dates</li>
+          <li>Change notices (ECN) carrying affected items and from → to revisions</li>
+          <li>Effectivity by date <em>or</em> by serial number — “from unit 0042 onward” is how a factory actually cuts a change in</li>
           <li>Stock disposition per part: use as is, rework, scrap, return to vendor</li>
           <li>A printable change notice for the people on the shop floor</li>
         </ul>
@@ -316,7 +436,7 @@
           <li>Revisions under a change cannot be released behind its back</li>
           <li>Releasing a change releases every one of its revisions atomically</li>
           <li>Nothing releases while a child part is still unreleased</li>
-          <li>Every mutation lands in an audit trail with who, what and when</li>
+          <li>Mutations through the internal API land in an audit trail with who, what and when</li>
         </ul>
       </div>
       <div class="card">
@@ -341,14 +461,68 @@
   </div>
 </section>
 
-<section class="alt" id="demo">
+<section class="alt" id="access">
+  <div class="wrap">
+    <div class="eyebrow">Need to know</div>
+    <h2>Not everyone should see everything</h2>
+    <p class="lede">
+      A customer programme under NDA, an export-controlled assembly, an acquisition still
+      unannounced — most PLM either gives everyone the whole database or forces you into a
+      second system. TurboPLM lets you close a single item without splitting your product
+      record in two.
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Closed means invisible, not scolded</h3>
+        <ul class="check">
+          <li>Grant a part, document, change, project or build unit to named people and groups</li>
+          <li>A restricted item is absent from lists, absent from search and absent from exports</li>
+          <li>A direct hit answers <code>404</code>, byte for byte the same as an item that never existed — a “forbidden” reply would confirm it is there</li>
+          <li>Read access and write access are separate grants, so a reviewer can be let in without being let loose</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Opt-in, so nothing changes until you say so</h3>
+        <ul class="check">
+          <li>An item with no grants behaves exactly as before — deploying this locks nobody out</li>
+          <li>The <em>first</em> grant is what closes an item, and the interface says so before you add it</li>
+          <li>Group membership is resolved at query time; deactivating a group suspends every grant it holds at once</li>
+          <li>Administrators always retain a way back in, so an item cannot be orphaned</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Hidden without lying</h3>
+        <ul class="check">
+          <li>A restricted child on a BOM you can read stays visible as a <em>Restricted</em> row with its quantity intact</li>
+          <li>Cost and material roll-ups that crossed something hidden say so, rather than returning a smaller number that looks complete</li>
+          <li>A recall trace still walks <em>through</em> restricted assemblies, so the shipped list is never quietly short</li>
+          <li>Where-used still reports that something you cannot see consumes this part — the honest answer to “is it safe to change?”</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Verified, not asserted</h3>
+        <ul class="check">
+          <li>The test suite enumerates the server's own GET route table at runtime and drives each route against a restricted item</li>
+          <li>A read endpoint added tomorrow is swept the moment it is registered — and the sweep fails if it cannot address a route, rather than scoring it as covered</li>
+          <li>Access is resolved in one place in the codebase — no route re-implements the rules</li>
+          <li>Machine credentials are subject to the same filter; an API key never outranks the person who created it</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
   <div class="wrap">
     <div class="eyebrow">Live demo</div>
     <h2>Try it on real data</h2>
     <p class="lede">
       A running instance, seeded with a four-level quadcopter product — two variants that
-      share subassemblies, released and in-work revisions, process plans, documents and
-      changes in flight. Create an account and click around.
+      share subassemblies, released and in-work revisions, process plans, a declared
+      material catalog with one part deliberately left unspecified so the planning gap is
+      visible, drawings under vault control with live redline threads, serialised build
+      units with their as-built genealogy, field service records, and changes in flight.
+      Create an account and click around.
     </p>
     <div class="demo-box">
       <div>
@@ -373,11 +547,12 @@
     <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
       Prefer your own copy? <code>git clone</code>, <code>docker compose up -d --build</code>,
       and you have the same thing on your laptop in a couple of minutes — demo data included.
+      <a href="#selfhosted">Get the source →</a>
     </p>
   </div>
 </section>
 
-<section id="selfhosted">
+<section class="alt" id="selfhosted">
   <div class="wrap">
     <div class="eyebrow">Self-hosted by design</div>
     <h2>Your product data stays yours</h2>
@@ -388,22 +563,24 @@
     <div class="grid g4">
       <div class="card"><h3>No tenant, no metering</h3><p>Run it on a laptop, a NAS or a VM. No seat counts, no usage telemetry, no per-user tax on inviting a colleague.</p></div>
       <div class="card"><h3>Plain Postgres</h3><p>Your data sits in a database you can query, dump and back up yourself — no proprietary store, no export fee.</p></div>
-      <div class="card"><h3>Open integration</h3><p>Scoped API keys, HMAC-signed webhooks, ERP-shaped item and BOM export, CSV import with dry-run validation.</p></div>
+      <div class="card"><h3>Open integration</h3><p>Scoped API keys, signed webhooks, ERP-shaped item and BOM export, CSV import that shows you what will change before it writes.</p></div>
       <div class="card"><h3>Readable source</h3><p>TypeScript end to end, a documented contract between the API and the client, and a schema you can extend.</p></div>
     </div>
-    <div class="stack">
-      <span class="chip"><b>React 18</b> + Ant Design</span>
-      <span class="chip"><b>Node 20</b> + Express</span>
-      <span class="chip"><b>Prisma</b> ORM</span>
-      <span class="chip"><b>PostgreSQL 16</b></span>
-      <span class="chip"><b>OpenCascade</b> CAD kernel</span>
-      <span class="chip"><b>three.js</b> 3D viewer</span>
-      <span class="chip"><b>Docker Compose</b></span>
+    <div class="demo-box" style="margin-top:30px">
+      <div>
+        <h3 style="margin-bottom:6px">Download and run it yourself</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0;max-width:56ch">
+          Clone the repository and bring the whole stack up with Docker Compose — the
+          application, the database and the CAD service, seeded with demo data, in a couple
+          of minutes.
+        </p>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/horatiumm-creator/turboplm">Get it on GitHub</a>
     </div>
   </div>
 </section>
 
-<section class="alt" id="consulting">
+<section id="consulting">
   <div class="wrap">
     <div class="eyebrow">Services</div>
     <h2>Get expert help</h2>
@@ -443,18 +620,18 @@
       <div>
         <h4>Product</h4>
         <a href="#tour">Watch the tour</a>
-      <a href="#capabilities">Capabilities</a>
+        <a href="#capabilities">Capabilities</a>
         <a href="#change">Change control</a>
-        <a href="#tour">Product tour</a>
+        <a href="#access">Access control</a>
         <a href="#demo">Live demo</a>
         <a href="#selfhosted">Self-hosted</a>
       </div>
       <div>
-        <h4>Resources</h4>
-        <a href="https://github.com/horatiumm-creator/turboplm">GitHub repository</a>
-        <a href="https://github.com/horatiumm-creator/turboplm#quick-start">Quick start</a>
-        <a href="https://github.com/horatiumm-creator/turboplm/issues">Issues &amp; requests</a>
+        <h4>Services</h4>
         <a href="#consulting">Consulting</a>
+        <a href="#consulting">Implementation</a>
+        <a href="#consulting">ERP &amp; CAD integration</a>
+        <a href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
       </div>
     </div>
     <div class="foot-bot">

@@ -8,12 +8,22 @@ import {
   PartCategory,
   Prisma,
   Role,
+  SignedEntityType,
   WorkflowStatus,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
-import { nextRevisionLabel } from '../lib/plm';
+import {
+  AclUser,
+  aclFilter,
+  assertCanRead,
+  assertCanWrite,
+  REDACTED,
+  visibleIds,
+} from '../lib/acl';
+import { assertSignaturesComplete } from './signatures';
+import { nextRevisionLabel, withNumberLock } from '../lib/plm';
 import { notifyUsers } from '../lib/notify';
 import { emitEvent } from '../lib/webhooks';
 import { instantiateWorkflow } from './workflows';
@@ -46,9 +56,22 @@ interface PartRefDto {
   uom: string;
 }
 
+/**
+ * Rule X4 — the stand-in for a part the caller may not read. A hidden part is never dropped
+ * from a response: an item list that quietly lost a line would understate the scope of the
+ * change, and the where-used roll-up under it would understate the impact. Identity out,
+ * structure in.
+ */
+interface RedactedRefDto {
+  redacted: true;
+  id: null;
+  partNumber: 'Restricted';
+  name: 'Restricted';
+}
+
 interface EcnItemDto {
   id: number;
-  part: PartRefDto;
+  part: PartRefDto | RedactedRefDto;
   fromRevision: RevisionRefDto | null;
   toRevision: RevisionRefDto | null;
   changeDescription: string | null;
@@ -78,11 +101,24 @@ interface EcnReviewDto {
 interface EcnDetailDto extends EcnSummaryDto {
   description: string | null;
   reason: string | null;
+  effectiveFromSerial: string | null;
   approvedBy: UserRefDto | null;
   approvedAt: string | null;
   releasedAt: string | null;
   items: EcnItemDto[];
   reviews: EcnReviewDto[];
+}
+
+interface WhereUsedEntryDto {
+  line: { id: number; findNumber: number; quantity: number; uom: string };
+  parentRevision: RevisionRefDto;
+  parentPart: { id: number; partNumber: string; name: string } | RedactedRefDto;
+}
+
+interface EcnImpactEntryDto {
+  part: PartRefDto | RedactedRefDto;
+  toRevision: RevisionRefDto | null;
+  usedIn: WhereUsedEntryDto[];
 }
 
 // ---------------------------------------------------------------------------
@@ -126,24 +162,42 @@ function toRevisionRef(rev: { id: number; revision: string; lifecycle: Lifecycle
   return rev ? { id: rev.id, revision: rev.revision, lifecycle: rev.lifecycle } : null;
 }
 
-function toEcnItem(item: EcnItemRow): EcnItemDto {
+/**
+ * Rule X4 — a part the caller may read maps in full; one they may not becomes the redacted
+ * node. `visibleParts` comes from a single `visibleIds` call per response, never from
+ * `assertCanRead` in a loop: a traversal has to degrade, not throw.
+ */
+function toPartRef(
+  part: { id: number; partNumber: string; name: string; category: PartCategory; uom: string },
+  visibleParts: Set<number>
+): PartRefDto | RedactedRefDto {
+  if (!visibleParts.has(part.id)) return { ...REDACTED };
+  return {
+    id: part.id,
+    partNumber: part.partNumber,
+    name: part.name,
+    category: part.category,
+    uom: part.uom,
+  };
+}
+
+function toEcnItem(item: EcnItemRow, visibleParts: Set<number>): EcnItemDto {
+  const visible = visibleParts.has(item.partId);
   return {
     id: item.id,
-    part: {
-      id: item.part.id,
-      partNumber: item.part.partNumber,
-      name: item.part.name,
-      category: item.part.category,
-      uom: item.part.uom,
-    },
-    fromRevision: toRevisionRef(item.fromRevision),
-    toRevision: toRevisionRef(item.toRevision),
+    part: toPartRef(item.part, visibleParts),
+    // The revision refs go with the identity they belong to: their ids address the hidden
+    // part's own history, and every route that would resolve one refuses it anyway. The item
+    // itself stays on the list, so the caller still learns that something they cannot see is
+    // in the scope of this change.
+    fromRevision: visible ? toRevisionRef(item.fromRevision) : null,
+    toRevision: visible ? toRevisionRef(item.toRevision) : null,
     changeDescription: item.changeDescription,
     disposition: item.disposition,
   };
 }
 
-function toEcnDetail(ecn: EcnDetailRow): EcnDetailDto {
+function toEcnDetail(ecn: EcnDetailRow, visibleParts: Set<number>): EcnDetailDto {
   return {
     id: ecn.id,
     ecnNumber: ecn.ecnNumber,
@@ -156,24 +210,52 @@ function toEcnDetail(ecn: EcnDetailRow): EcnDetailDto {
     createdBy: { id: ecn.createdBy.id, name: ecn.createdBy.name },
     description: ecn.description,
     reason: ecn.reason,
+    effectiveFromSerial: ecn.effectiveFromSerial,
     approvedBy: ecn.approvedBy ? { id: ecn.approvedBy.id, name: ecn.approvedBy.name } : null,
     approvedAt: ecn.approvedAt ? ecn.approvedAt.toISOString() : null,
     releasedAt: ecn.releasedAt ? ecn.releasedAt.toISOString() : null,
-    items: ecn.items.map(toEcnItem),
+    // itemCount above counts redacted items too, so the header never disagrees with the list.
+    items: ecn.items.map((item) => toEcnItem(item, visibleParts)),
     reviews: ecn.reviews.map(toEcnReview),
   };
 }
 
-async function getEcnDetailOrThrow(id: number): Promise<EcnDetailDto> {
-  const ecn = await prisma.ecn.findUnique({ where: { id }, include: ecnDetailInclude });
+/**
+ * The one ECN detail read path — every route that returns an ECN goes through it, so the ACL
+ * check cannot be forgotten on a new one.
+ *
+ * `findFirst` with the filter rather than `findUnique`: `aclFilter` is a relation condition and
+ * `findUnique` accepts unique fields only. A hidden ECN 404s with the same message a deleted one
+ * does, which is the whole point of rule X2's 404-never-403.
+ */
+async function getEcnDetailOrThrow(id: number, user: AclUser): Promise<EcnDetailDto> {
+  const ecn = await prisma.ecn.findFirst({
+    where: { id, ...aclFilter('ECN', user) },
+    include: ecnDetailInclude,
+  });
   if (!ecn) throw new HttpError(404, 'ECN not found');
-  return toEcnDetail(ecn);
+  // A readable ECN still names parts, and a part carries its own grants — one bulk lookup
+  // decides which of them survive into the response (rule X3, nested reads).
+  const visibleParts = await visibleIds(
+    'PART',
+    ecn.items.map((item) => item.partId),
+    user
+  );
+  return toEcnDetail(ecn, visibleParts);
 }
 
-async function getEcnItemDtoOrThrow(id: number): Promise<EcnItemDto> {
-  const item = await prisma.ecnItem.findUnique({ where: { id }, include: ecnItemInclude });
+/**
+ * Item reads are scoped through the owning ECN — the acl rows live on `Ecn`, so the filter goes
+ * on the relation. The 404 text stays the item's own: answering `ECN not found` here would tell
+ * the caller their item id exists and hangs off an ECN they may not see.
+ */
+async function getEcnItemDtoOrThrow(id: number, user: AclUser): Promise<EcnItemDto> {
+  const item = await prisma.ecnItem.findFirst({
+    where: { id, ecn: { ...aclFilter('ECN', user) } },
+    include: ecnItemInclude,
+  });
   if (!item) throw new HttpError(404, 'ECN item not found');
-  return toEcnItem(item);
+  return toEcnItem(item, await visibleIds('PART', [item.partId], user));
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +265,16 @@ async function getEcnItemDtoOrThrow(id: number): Promise<EcnItemDto> {
 function currentUserId(req: Request): number {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
   return req.user.id;
+}
+
+/**
+ * The ACL principal for this request. Deliberately built from `req.user` on every call rather
+ * than cached on the request: a stale principal is the one input that would make the enforcement
+ * module answer for the wrong user.
+ */
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
 }
 
 function requireBody(req: Request): Record<string, unknown> {
@@ -233,6 +325,29 @@ function parseEffectivityDate(value: unknown): Date | null {
   return date;
 }
 
+/**
+ * Rule U6 — an ECN cuts in by date or by unit, never both: with both set there is no single
+ * answer to which units carry the change. Callers pass the values the write would leave
+ * behind, so setting one while the other already holds is caught too.
+ */
+function assertSingleEffectivity(
+  effectivityDate: Date | null,
+  effectiveFromSerial: string | null
+): void {
+  if (effectivityDate !== null && effectiveFromSerial !== null) {
+    throw new HttpError(400, 'Set either effectivityDate or effectiveFromSerial, not both');
+  }
+}
+
+/** Rule E2 — these stop being PATCHable once the ECN leaves DRAFT. */
+const DRAFT_ONLY_HEADER_FIELDS = [
+  'title',
+  'description',
+  'reason',
+  'priority',
+  'effectivityDate',
+] as const;
+
 /** Rule E2 — header/items editable only in the given statuses. */
 function assertEcnEditable(
   ecn: { ecnNumber: string; status: EcnStatus },
@@ -244,8 +359,8 @@ function assertEcnEditable(
 }
 
 /** Rule E1 — scan-based numbering, ECN-10001 style. */
-async function generateEcnNumber(): Promise<string> {
-  const rows = await prisma.$queryRaw<{ max: number | null }[]>`
+async function generateEcnNumber(db: Prisma.TransactionClient = prisma): Promise<string> {
+  const rows = await db.$queryRaw<{ max: number | null }[]>`
     SELECT MAX(SUBSTRING("ecnNumber" FROM 5)::int) AS max
     FROM "Ecn"
     WHERE "ecnNumber" ~ '^ECN-[0-9]{1,9}$'`;
@@ -267,7 +382,10 @@ router.get(
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
 
-    const where: Prisma.EcnWhereInput = {};
+    // Rule X3 — the ACL fragment seeds the `where`, and `count` below shares it: a total taken
+    // over rows the caller cannot list would leak their existence. The fragment only ever sets
+    // `AND`, so the search `OR` and the status filter cannot collide with it.
+    const where: Prisma.EcnWhereInput = { ...aclFilter('ECN', aclUser(req)) };
     if (search) {
       where.OR = [
         { ecnNumber: { contains: search, mode: 'insensitive' } },
@@ -317,7 +435,7 @@ router.post(
   '/ecns',
   asyncHandler(async (req, res) => {
     const body = requireBody(req);
-    const userId = currentUserId(req);
+    const user = aclUser(req);
 
     const title = requireTitle(body.title);
     const description =
@@ -326,26 +444,41 @@ router.post(
     const priority = body.priority === undefined ? EcnPriority.MEDIUM : parsePriority(body.priority);
     const effectivityDate =
       body.effectivityDate === undefined ? null : parseEffectivityDate(body.effectivityDate);
+    const effectiveFromSerial =
+      body.effectiveFromSerial === undefined
+        ? null
+        : optionalNullableText(body.effectiveFromSerial, 'effectiveFromSerial');
+    assertSingleEffectivity(effectivityDate, effectiveFromSerial);
 
-    const createEcnRecord = (ecnNumber: string) =>
-      prisma.ecn.create({
-        data: { ecnNumber, title, description, reason, priority, effectivityDate, createdById: userId },
+    const createEcnRecord = (ecnNumber: string, db: Prisma.TransactionClient = prisma) =>
+      db.ecn.create({
+        data: {
+          ecnNumber,
+          title,
+          description,
+          reason,
+          priority,
+          effectivityDate,
+          effectiveFromSerial,
+          createdById: user.id,
+        },
         select: { id: true },
       });
 
     // Numbers can only collide under concurrent creates — regenerate and retry.
-    const created = await (async () => {
+    const created = await withNumberLock(async (tx) => {
+      // Serialized allocation; the retry is a backstop for a manually-typed clash.
       for (let attempt = 0; ; attempt++) {
         try {
-          return await createEcnRecord(await generateEcnNumber());
+          return await createEcnRecord(await generateEcnNumber(tx), tx);
         } catch (err) {
           if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
           throw err;
         }
       }
-    })();
+    });
 
-    res.status(201).json(await getEcnDetailOrThrow(created.id));
+    res.status(201).json(await getEcnDetailOrThrow(created.id, user));
   })
 );
 
@@ -356,26 +489,41 @@ router.post(
 router.get(
   '/ecns/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getEcnDetailOrThrow(idParam(req.params.id)));
+    res.json(await getEcnDetailOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
 // ---------------------------------------------------------------------------
-// PATCH /ecns/:id — header fields (rule E2: DRAFT only)
+// PATCH /ecns/:id — header fields (rule E2: DRAFT only; U6: serial also in IN_REVIEW)
 // ---------------------------------------------------------------------------
 
 router.patch(
   '/ecns/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Rule X3 — 404 (unreadable), then 403 (read-only), before the body is parsed.
+    await assertCanWrite('ECN', id, user);
     const body = requireBody(req);
 
     const ecn = await prisma.ecn.findUnique({
       where: { id },
-      select: { id: true, ecnNumber: true, status: true },
+      select: {
+        id: true,
+        ecnNumber: true,
+        status: true,
+        effectivityDate: true,
+        effectiveFromSerial: true,
+      },
     });
     if (!ecn) throw new HttpError(404, 'ECN not found');
-    assertEcnEditable(ecn);
+    // Rule U6 — the unit cut-in stays editable through review, unlike every other header
+    // field (E2): the serial it starts at is often only pinned down while the change is
+    // being reviewed. So the gate is per field, not per request.
+    const serialOnly =
+      body.effectiveFromSerial !== undefined &&
+      !DRAFT_ONLY_HEADER_FIELDS.some((field) => body[field] !== undefined);
+    assertEcnEditable(ecn, serialOnly ? [EcnStatus.DRAFT, EcnStatus.IN_REVIEW] : [EcnStatus.DRAFT]);
 
     const data: Prisma.EcnUpdateInput = {};
     if (body.title !== undefined) data.title = requireTitle(body.title);
@@ -383,11 +531,22 @@ router.patch(
       data.description = optionalNullableText(body.description, 'description');
     if (body.reason !== undefined) data.reason = optionalNullableText(body.reason, 'reason');
     if (body.priority !== undefined) data.priority = parsePriority(body.priority);
-    if (body.effectivityDate !== undefined)
-      data.effectivityDate = parseEffectivityDate(body.effectivityDate);
+
+    // Resolved against the stored row so the check sees the resulting state, not the body.
+    const effectivityDate =
+      body.effectivityDate === undefined
+        ? ecn.effectivityDate
+        : parseEffectivityDate(body.effectivityDate);
+    const effectiveFromSerial =
+      body.effectiveFromSerial === undefined
+        ? ecn.effectiveFromSerial
+        : optionalNullableText(body.effectiveFromSerial, 'effectiveFromSerial');
+    assertSingleEffectivity(effectivityDate, effectiveFromSerial);
+    if (body.effectivityDate !== undefined) data.effectivityDate = effectivityDate;
+    if (body.effectiveFromSerial !== undefined) data.effectiveFromSerial = effectiveFromSerial;
 
     await prisma.ecn.update({ where: { id }, data });
-    res.json(await getEcnDetailOrThrow(id));
+    res.json(await getEcnDetailOrThrow(id, user));
   })
 );
 
@@ -399,6 +558,7 @@ router.delete(
   '/ecns/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    await assertCanWrite('ECN', id, aclUser(req));
     const ecn = await prisma.ecn.findUnique({
       where: { id },
       include: { items: { select: { toRevisionId: true } } },
@@ -426,6 +586,8 @@ router.post(
   '/ecns/:id/items',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    await assertCanWrite('ECN', id, user);
     const body = requireBody(req);
 
     const ecn = await prisma.ecn.findUnique({
@@ -446,7 +608,11 @@ router.post(
     const disposition =
       body.disposition === undefined ? EcnDisposition.USE_AS_IS : parseDisposition(body.disposition);
 
-    const part = await prisma.part.findUnique({ where: { id: partId } });
+    // A restricted part cannot be put on a change: the item would name it to every reader of
+    // the ECN. 404, indistinguishable from a part that does not exist.
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...(aclFilter('PART', user) as Prisma.PartWhereInput) },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
 
     // Serialize ECN membership writes so two concurrent adds cannot both pass
@@ -463,12 +629,17 @@ router.post(
       // Rule E3 — one active ECN per part.
       const elsewhere = await tx.ecnItem.findFirst({
         where: { partId, ecnId: { not: id }, ecn: { status: { in: ACTIVE_STATUSES } } },
-        include: { ecn: { select: { ecnNumber: true } } },
+        include: { ecn: { select: { id: true, ecnNumber: true } } },
       });
       if (elsewhere) {
+        // The one-active-ECN rule must hold whoever is looking — but when the other ECN is
+        // restricted, its number must not ride out on the error message.
+        const visibleEcns = await visibleIds('ECN', [elsewhere.ecn.id], user);
         throw new HttpError(
           409,
-          `Part ${part.partNumber} is already on active ECN ${elsewhere.ecn.ecnNumber}`
+          visibleEcns.has(elsewhere.ecn.id)
+            ? `Part ${part.partNumber} is already on active ECN ${elsewhere.ecn.ecnNumber}`
+            : `Part ${part.partNumber} is already on an active restricted ECN`
         );
       }
 
@@ -489,7 +660,7 @@ router.post(
         select: { id: true },
       });
     });
-    res.status(201).json(await getEcnItemDtoOrThrow(created.id));
+    res.status(201).json(await getEcnItemDtoOrThrow(created.id, user));
   })
 );
 
@@ -501,13 +672,15 @@ router.patch(
   '/ecn-items/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const body = requireBody(req);
-
-    const item = await prisma.ecnItem.findUnique({
-      where: { id },
+    const user = aclUser(req);
+    // An item of an unreadable ECN answers with the item's own 404 (see getEcnItemDtoOrThrow).
+    const item = await prisma.ecnItem.findFirst({
+      where: { id, ecn: { ...aclFilter('ECN', user) } },
       include: { ecn: { select: { ecnNumber: true, status: true } } },
     });
     if (!item) throw new HttpError(404, 'ECN item not found');
+    await assertCanWrite('ECN', item.ecnId, user);
+    const body = requireBody(req);
     assertEcnEditable(item.ecn, [EcnStatus.DRAFT, EcnStatus.IN_REVIEW]);
 
     const data: Prisma.EcnItemUpdateInput = {};
@@ -516,7 +689,7 @@ router.patch(
     if (body.disposition !== undefined) data.disposition = parseDisposition(body.disposition);
 
     await prisma.ecnItem.update({ where: { id }, data });
-    res.json(await getEcnItemDtoOrThrow(id));
+    res.json(await getEcnItemDtoOrThrow(id, user));
   })
 );
 
@@ -528,11 +701,13 @@ router.delete(
   '/ecn-items/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const item = await prisma.ecnItem.findUnique({
-      where: { id },
+    const user = aclUser(req);
+    const item = await prisma.ecnItem.findFirst({
+      where: { id, ecn: { ...aclFilter('ECN', user) } },
       include: { ecn: { select: { ecnNumber: true, status: true } } },
     });
     if (!item) throw new HttpError(404, 'ECN item not found');
+    await assertCanWrite('ECN', item.ecnId, user);
     assertEcnEditable(item.ecn);
     await prisma.ecnItem.delete({ where: { id } });
     res.status(204).end();
@@ -548,15 +723,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
     const userId = currentUserId(req);
+    const user = aclUser(req);
 
-    const item = await prisma.ecnItem.findUnique({
-      where: { id },
+    const item = await prisma.ecnItem.findFirst({
+      where: { id, ecn: { ...aclFilter('ECN', user) } },
       include: {
         ecn: { select: { ecnNumber: true, status: true } },
         part: { select: { id: true, partNumber: true } },
       },
     });
     if (!item) throw new HttpError(404, 'ECN item not found');
+    await assertCanWrite('ECN', item.ecnId, user);
     assertEcnEditable(item.ecn, [EcnStatus.DRAFT, EcnStatus.IN_REVIEW]);
     if (item.toRevisionId !== null) {
       throw new HttpError(409, 'Change already started for this part');
@@ -590,12 +767,16 @@ router.post(
 
         const linked = await tx.ecnItem.findFirst({
           where: { toRevisionId: latest.id, ecn: { status: { in: ACTIVE_STATUSES } } },
-          include: { ecn: { select: { ecnNumber: true } } },
+          include: { ecn: { select: { id: true, ecnNumber: true } } },
         });
         if (linked) {
+          // The block stands whoever holds the other ECN; only its number is need-to-know.
+          const visibleEcns = await visibleIds('ECN', [linked.ecn.id], user);
           throw new HttpError(
             409,
-            `Latest revision of ${item.part.partNumber} is managed by ECN ${linked.ecn.ecnNumber}`
+            visibleEcns.has(linked.ecn.id)
+              ? `Latest revision of ${item.part.partNumber} is managed by ECN ${linked.ecn.ecnNumber}`
+              : `Latest revision of ${item.part.partNumber} is managed by a restricted ECN`
           );
         }
         const fromRevision = await tx.partRevision.findFirst({
@@ -608,7 +789,7 @@ router.post(
           data: { toRevisionId: latest.id, fromRevisionId: fromRevision?.id ?? null },
         });
       });
-      res.json(await getEcnItemDtoOrThrow(id));
+      res.json(await getEcnItemDtoOrThrow(id, user));
       return;
     }
 
@@ -698,7 +879,7 @@ router.post(
       });
     });
 
-    res.status(201).json(await getEcnItemDtoOrThrow(id));
+    res.status(201).json(await getEcnItemDtoOrThrow(id, user));
   })
 );
 
@@ -710,8 +891,9 @@ router.post(
   '/ecns/:id/reviewers',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const body = requireBody(req);
     const actorId = currentUserId(req);
+    await assertCanWrite('ECN', id, aclUser(req));
+    const body = requireBody(req);
 
     const ecn = await prisma.ecn.findUnique({
       where: { id },
@@ -771,11 +953,13 @@ router.delete(
   '/ecn-reviews/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const review = await prisma.ecnReview.findUnique({
-      where: { id },
+    const user = aclUser(req);
+    const review = await prisma.ecnReview.findFirst({
+      where: { id, ecn: { ...aclFilter('ECN', user) } },
       include: { ecn: { select: { ecnNumber: true, status: true } } },
     });
     if (!review) throw new HttpError(404, 'Review not found');
+    await assertCanWrite('ECN', review.ecnId, user);
     assertEcnEditable(review.ecn, [EcnStatus.DRAFT, EcnStatus.IN_REVIEW]);
     if (review.decision !== EcnReviewDecision.PENDING) {
       throw new HttpError(409, 'A decided review cannot be removed');
@@ -803,8 +987,12 @@ router.post(
     const comment =
       body.comment === undefined ? undefined : optionalNullableText(body.comment, 'comment');
 
-    const review = await prisma.ecnReview.findUnique({
-      where: { id },
+    // Scoped by the ECN's read filter: an assigned reviewer who has since lost visibility of a
+    // restricted ECN can no longer decide it — deciding a change one cannot read is worse than
+    // stalling the review. No write grant needed beyond that: the assignment itself is the
+    // authorization, checked on the next line.
+    const review = await prisma.ecnReview.findFirst({
+      where: { id, ecn: { ...aclFilter('ECN', aclUser(req)) } },
       include: {
         ecn: { select: { id: true, ecnNumber: true, title: true, status: true, createdById: true } },
       },
@@ -858,8 +1046,9 @@ router.get(
   '/ecns/:id/impact',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const ecn = await prisma.ecn.findUnique({
-      where: { id },
+    const user = aclUser(req);
+    const ecn = await prisma.ecn.findFirst({
+      where: { id, ...aclFilter('ECN', user) },
       include: {
         items: {
           orderBy: { id: 'asc' },
@@ -869,7 +1058,7 @@ router.get(
     });
     if (!ecn) throw new HttpError(404, 'ECN not found');
 
-    const entries = await Promise.all(
+    const rawEntries = await Promise.all(
       ecn.items.map(async (item) => {
         const lines = await prisma.bomLine.findMany({
           where: { childPartId: item.partId },
@@ -885,16 +1074,28 @@ router.get(
             },
           },
         });
-        return {
-          part: {
-            id: item.part.id,
-            partNumber: item.part.partNumber,
-            name: item.part.name,
-            category: item.part.category,
-            uom: item.part.uom,
-          },
-          toRevision: toRevisionRef(item.toRevision),
-          usedIn: lines.map((line) => ({
+        return { item, lines };
+      })
+    );
+    // Rule X4 — one visibility query for the whole rollup: item parts and every BOM parent.
+    // Both sides redact rather than drop, the same shape the where-used route answers with:
+    // an impact list that omitted a restricted consumer would call a change safe when it isn't.
+    const visibleParts = await visibleIds(
+      'PART',
+      rawEntries.flatMap(({ item, lines }) => [
+        item.partId,
+        ...lines.map((line) => line.parentRevision.part.id),
+      ]),
+      user
+    );
+    const entries = rawEntries.map(({ item, lines }) => {
+      const itemVisible = visibleParts.has(item.partId);
+      return {
+        part: toPartRef(item.part, visibleParts),
+        toRevision: itemVisible ? toRevisionRef(item.toRevision) : null,
+        usedIn: lines.map((line) => {
+          const parentVisible = visibleParts.has(line.parentRevision.part.id);
+          return {
             line: {
               id: line.id,
               findNumber: line.findNumber,
@@ -903,18 +1104,24 @@ router.get(
             },
             parentRevision: {
               id: line.parentRevision.id,
-              revision: line.parentRevision.revision,
+              revision: parentVisible ? line.parentRevision.revision : REDACTED.name,
               lifecycle: line.parentRevision.lifecycle,
             },
-            parentPart: {
-              id: line.parentRevision.part.id,
-              partNumber: line.parentRevision.part.partNumber,
-              name: line.parentRevision.part.name,
-            },
-          })),
-        };
-      })
-    );
+            parentPart: parentVisible
+              ? {
+                  id: line.parentRevision.part.id,
+                  partNumber: line.parentRevision.part.partNumber,
+                  name: line.parentRevision.part.name,
+                }
+              : {
+                  id: line.parentRevision.part.id,
+                  partNumber: REDACTED.partNumber,
+                  name: REDACTED.name,
+                },
+          };
+        }),
+      };
+    });
     res.json(entries);
   })
 );
@@ -940,6 +1147,9 @@ router.post(
   '/ecns/:id/transition',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
+    const user = aclUser(req);
+    // Rule X3 — before the body: a 400 about the action must not confirm the ECN exists.
+    await assertCanWrite('ECN', id, user);
     const body = requireBody(req);
     const userId = currentUserId(req);
 
@@ -1014,13 +1224,26 @@ router.post(
           `Cannot approve: approval is managed by workflow ${ecn.workflow.templateName}`
         );
       }
-      const missing = ecn.items
-        .filter((item) => item.toRevision === null)
-        .map((item) => item.part.partNumber)
-        .sort();
+      const missing = ecn.items.filter((item) => item.toRevision === null);
       if (missing.length > 0) {
-        throw new HttpError(409, `Cannot approve: no working revision for: ${missing.join(', ')}`);
+        // A writer of this ECN may still be blind to some of its parts — the gate holds
+        // either way, but a hidden part's number must not surface in the message.
+        const visibleParts = await visibleIds(
+          'PART',
+          missing.map((item) => item.part.id),
+          user
+        );
+        const names = missing
+          .map((item) =>
+            visibleParts.has(item.part.id) ? item.part.partNumber : REDACTED.partNumber
+          )
+          .sort();
+        throw new HttpError(409, `Cannot approve: no working revision for: ${names.join(', ')}`);
       }
+      // Rule S4 — every active ECN signature requirement must hold a valid signature.
+      // No requirements configured means nothing is gated, so an unregulated shop is
+      // unaffected by the feature existing.
+      await assertSignaturesComplete(SignedEntityType.ECN, id, 'approve');
       // Rule E13 — with reviewers assigned, all of them must have approved.
       // Rule W7 — the flat-reviewer gate only applies when no workflow
       // instance exists for the ECN (whatever its status).
@@ -1090,21 +1313,39 @@ router.post(
         });
 
         const affectedPartIds = new Set(items.map((item) => item.partId));
-        const offenders = new Set<string>();
+        // The gates below hold regardless of who is looking, but their messages name parts —
+        // and a writer of the ECN may still be blind to some of them. One bulk visibility
+        // lookup covers every name a message could carry (rule X4).
+        const visibleParts = await visibleIds(
+          'PART',
+          items.flatMap((item) => [
+            item.partId,
+            ...(item.toRevision?.bomLines.map((line) => line.childPart.id) ?? []),
+          ]),
+          user
+        );
+        const partName = (partId: number, partNumber: string) =>
+          visibleParts.has(partId) ? partNumber : REDACTED.partNumber;
+        // Keyed by part id, so several hidden offenders stay several — collapsing them into
+        // one "Restricted" would understate what blocks the release.
+        const offenders = new Map<number, string>();
         for (const item of items) {
           if (!item.toRevision) {
             throw new HttpError(
               409,
-              `Cannot release: no working revision for ${item.part.partNumber}`
+              `Cannot release: no working revision for ${partName(item.partId, item.part.partNumber)}`
             );
           }
           if (
             item.toRevision.lifecycle !== Lifecycle.IN_WORK &&
             item.toRevision.lifecycle !== Lifecycle.IN_REVIEW
           ) {
+            const name = partName(item.partId, item.part.partNumber);
             throw new HttpError(
               409,
-              `Cannot release: revision ${item.toRevision.revision} of ${item.part.partNumber} is ${item.toRevision.lifecycle}`
+              visibleParts.has(item.partId)
+                ? `Cannot release: revision ${item.toRevision.revision} of ${name} is ${item.toRevision.lifecycle}`
+                : `Cannot release: the working revision of ${name} is ${item.toRevision.lifecycle}`
             );
           }
           for (const line of item.toRevision.bomLines) {
@@ -1112,14 +1353,17 @@ router.post(
               (r) => r.lifecycle === Lifecycle.RELEASED
             );
             if (!childReleased && !affectedPartIds.has(line.childPart.id)) {
-              offenders.add(line.childPart.partNumber);
+              offenders.set(
+                line.childPart.id,
+                partName(line.childPart.id, line.childPart.partNumber)
+              );
             }
           }
         }
         if (offenders.size > 0) {
           throw new HttpError(
             409,
-            `Cannot release: child parts without a released revision: ${[...offenders].sort().join(', ')}`
+            `Cannot release: child parts without a released revision: ${[...offenders.values()].sort().join(', ')}`
           );
         }
 
@@ -1139,7 +1383,11 @@ router.post(
         }
         await conditionalUpdate(tx, {
           releasedAt: now,
-          effectivityDate: ecn.effectivityDate ?? now,
+          // Rule U6 — only default a date cut-in when the ECN has no unit cut-in. Stamping
+          // both would permanently produce the ambiguous state U6 exists to forbid, and
+          // release is the one path that writes effectivityDate without the validator.
+          effectivityDate:
+            ecn.effectivityDate ?? (ecn.effectiveFromSerial ? null : now),
         });
         await notifyUsers(tx, [ecn.createdById, ...reviewerIds], userId, {
           type: 'ECN_RELEASED',
@@ -1260,7 +1508,7 @@ router.post(
       });
     }
 
-    res.json(await getEcnDetailOrThrow(id));
+    res.json(await getEcnDetailOrThrow(id, user));
   })
 );
 

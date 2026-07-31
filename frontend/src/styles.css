@@ -21,3 +21,8 @@ body,
 .compare-row-changed > td {
   background: #fffbe6 !important;
 }
+
+/* Lowest quote on an RFQ line */
+.rfq-quote-lowest > td {
+  background: #f6ffed !important;
+}

@@ -20,11 +20,22 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
     res.status(err.status).json({ error: err.message });
     return;
   }
-  // body-parser rejects oversized payloads before any route runs.
-  if ((err as { type?: string } | null)?.type === 'entity.too.large') {
+  // body-parser rejects malformed and oversized payloads before any route runs. Both are
+  // the caller's fault, so neither may surface as a 500 — that would report a server
+  // fault for a bad request and bury it in the error log.
+  const bodyParserType = (err as { type?: string } | null)?.type;
+  if (bodyParserType === 'entity.too.large') {
     res.status(413).json({
       error: 'Request body is too large — split the import into smaller batches',
     });
+    return;
+  }
+  if (bodyParserType === 'entity.parse.failed') {
+    res.status(400).json({ error: 'Request body is not valid JSON' });
+    return;
+  }
+  if (bodyParserType === 'charset.unsupported' || bodyParserType === 'encoding.unsupported') {
+    res.status(415).json({ error: 'Unsupported request encoding' });
     return;
   }
   if (err instanceof multer.MulterError) {

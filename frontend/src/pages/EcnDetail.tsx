@@ -37,8 +37,10 @@ import {
 import dayjs, { type Dayjs } from 'dayjs';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
+import ItemAccessCard from '../components/ItemAccessCard';
 import { useAuth } from '../auth/AuthContext';
 import DocumentsCard from '../components/DocumentsCard';
+import SignaturePanel from '../components/SignaturePanel';
 import type {
   EcnDetail as EcnDetailDto,
   EcnDisposition,
@@ -131,6 +133,10 @@ export default function EcnDetail() {
   const searchTimer = useRef<number | undefined>(undefined);
   const [itemForm] = Form.useForm<ItemFormValues>();
 
+  // Bumped whenever the ECN reloads: an item change may have voided signatures, and the
+  // panel has to re-read the manifest to notice.
+  const [signatureKey, setSignatureKey] = useState(0);
+
   const load = useCallback(async () => {
     if (!Number.isInteger(ecnId) || ecnId <= 0) {
       setNotFound(true);
@@ -144,6 +150,7 @@ export default function EcnDetail() {
         api.getEcnWorkflow(ecnId).catch(() => null),
       ]);
       setEcn(detail);
+      setSignatureKey((key) => key + 1);
       setImpact(impactEntries);
       setWorkflow(workflowDetail);
       setNotFound(false);
@@ -221,6 +228,8 @@ export default function EcnDetail() {
         try {
           const updated = await api.transitionEcn(ecn.id, action);
           setEcn(updated);
+      setSignatureKey((key) => key + 1);
+          setSignatureKey((key) => key + 1);
           message.success(`${updated.ecnNumber} is now ${updated.status.replace('_', ' ')}`);
         } catch (err) {
           modal.error({
@@ -1126,6 +1135,15 @@ export default function EcnDetail() {
       </Card>
 
       <div style={{ marginTop: 16 }}>
+        <SignaturePanel
+          entityType="ECN"
+          entityId={ecn.id}
+          refreshKey={signatureKey}
+          onSigned={() => void load()}
+        />
+      </div>
+
+      <div style={{ marginTop: 16 }}>
         <DocumentsCard title="Documents" ecnId={ecn.id} editable={user?.role !== 'VIEWER'} />
       </div>
 
@@ -1264,6 +1282,10 @@ export default function EcnDetail() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <div style={{ marginTop: 16 }}>
+        <ItemAccessCard entityType="ECN" entityId={ecn.id} />
+      </div>
     </div>
   );
 }

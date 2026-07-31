@@ -3,6 +3,7 @@ import { AmlStatus, Manufacturer, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter, assertCanWrite } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -142,6 +143,16 @@ router.post(
   })
 );
 
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+function partAcl(user: AclUser): Prisma.PartWhereInput {
+  return aclFilter('PART', user) as Prisma.PartWhereInput;
+}
+
 // ---------------------------------------------------------------------------
 // GET /parts/:id/manufacturer-parts — AML for a part (rule T3 ordering)
 // ---------------------------------------------------------------------------
@@ -150,7 +161,11 @@ router.get(
   '/parts/:id/manufacturer-parts',
   asyncHandler(async (req, res) => {
     const partId = idParam(req.params.id);
-    const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+    // A restricted part 404s like a missing one (rule X2).
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...partAcl(aclUser(req)) },
+      select: { id: true },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
 
     const rows = await prisma.manufacturerPart.findMany({
@@ -180,8 +195,14 @@ router.post(
     const description =
       body.description === undefined ? null : optionalNullableText(body.description, 'description');
 
-    const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+    const user = aclUser(req);
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...partAcl(user) },
+      select: { id: true },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
+    // The AML is the part's sourcing definition — a write to the part.
+    await assertCanWrite('PART', partId, user);
     const manufacturer = await prisma.manufacturer.findUnique({
       where: { id: manufacturerId },
       select: { id: true },
@@ -214,8 +235,12 @@ router.patch(
     const id = idParam(req.params.id);
     const body = requireBody(req);
 
-    const existing = await prisma.manufacturerPart.findUnique({ where: { id } });
+    const user = aclUser(req);
+    const existing = await prisma.manufacturerPart.findFirst({
+      where: { id, part: partAcl(user) },
+    });
     if (!existing) throw new HttpError(404, 'Manufacturer part not found');
+    await assertCanWrite('PART', existing.partId, user);
 
     const data: Prisma.ManufacturerPartUpdateInput = {};
     let newMpn: string | undefined;
@@ -260,11 +285,13 @@ router.delete(
   '/manufacturer-parts/:id',
   asyncHandler(async (req, res) => {
     const id = idParam(req.params.id);
-    const existing = await prisma.manufacturerPart.findUnique({
-      where: { id },
-      select: { id: true },
+    const user = aclUser(req);
+    const existing = await prisma.manufacturerPart.findFirst({
+      where: { id, part: partAcl(user) },
+      select: { id: true, partId: true },
     });
     if (!existing) throw new HttpError(404, 'Manufacturer part not found');
+    await assertCanWrite('PART', existing.partId, user);
     await prisma.manufacturerPart.delete({ where: { id } });
     res.status(204).end();
   })

@@ -1,5 +1,7 @@
 import { Request, Router } from 'express';
 import {
+  BuildKind,
+  BuildStatus,
   CapaStatus,
   EcnDisposition,
   EcnPriority,
@@ -11,9 +13,11 @@ import {
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { notifyUsers } from '../lib/notify';
+import { lockNumbering, withNumberLock } from '../lib/plm';
 
 const router = Router();
 router.use(requireAuth);
@@ -40,6 +44,12 @@ interface RevisionRefDto {
   revision: string;
   lifecycle: Lifecycle;
 }
+interface BuildUnitRefDto {
+  id: number;
+  identifier: string;
+  kind: BuildKind;
+  status: BuildStatus;
+}
 
 interface NcrSummaryDto {
   id: number;
@@ -48,7 +58,7 @@ interface NcrSummaryDto {
   severity: NcrSeverity;
   status: NcrStatus;
   disposition: EcnDisposition | null;
-  part: PartRefDto | null;
+  part: PartRefDto | typeof REDACTED | null;
   createdBy: UserRefDto;
   createdAt: string;
   capa: { id: number; capaNumber: string } | null;
@@ -58,6 +68,8 @@ interface NcrDetailDto extends NcrSummaryDto {
   description: string;
   quantityAffected: number | null;
   lotOrSerial: string | null;
+  buildUnitId: number | null;
+  buildUnit: BuildUnitRefDto | null;
   partRevision: RevisionRefDto | null;
   ecn: { id: number; ecnNumber: string; status: EcnStatus } | null;
   closedBy: UserRefDto | null;
@@ -94,6 +106,7 @@ interface CapaDetailDto extends CapaSummaryDto {
 const ncrInclude = {
   part: true,
   partRevision: { select: { id: true, revision: true, lifecycle: true } },
+  buildUnit: { select: { id: true, identifier: true, kind: true, status: true } },
   ecn: { select: { id: true, ecnNumber: true, status: true } },
   capa: { select: { id: true, capaNumber: true } },
   createdBy: { select: { id: true, name: true } },
@@ -110,18 +123,47 @@ const capaInclude = {
 type NcrRow = Prisma.NonconformanceGetPayload<{ include: typeof ncrInclude }>;
 type CapaRow = Prisma.CorrectiveActionGetPayload<{ include: typeof capaInclude }>;
 
-const toPartRef = (part: NcrRow['part']): PartRefDto | null =>
+/**
+ * Rule X4 — an NCR is not itself a protected type, but it names four things that are: its
+ * part, that part's revision, a build unit and an ECN. All of them are redacted in place —
+ * the defect record stays (severity, status, quantities), the identity does not.
+ */
+interface QualityVisibility {
+  parts: ReadonlySet<number>;
+  units: ReadonlySet<number>;
+  ecns: ReadonlySet<number>;
+}
+
+async function qualityVisibility(ncrs: NcrRow[], user: AclUser): Promise<QualityVisibility> {
+  const [parts, units, ecns] = await Promise.all([
+    visibleIds('PART', ncrs.flatMap((ncr) => (ncr.partId === null ? [] : [ncr.partId])), user),
+    visibleIds(
+      'BUILD_UNIT',
+      ncrs.flatMap((ncr) => (ncr.buildUnitId === null ? [] : [ncr.buildUnitId])),
+      user
+    ),
+    visibleIds('ECN', ncrs.flatMap((ncr) => (ncr.ecnId === null ? [] : [ncr.ecnId])), user),
+  ]);
+  return { parts, units, ecns };
+}
+
+const toPartRef = (
+  part: NcrRow['part'],
+  vis: QualityVisibility
+): PartRefDto | typeof REDACTED | null =>
   part
-    ? {
-        id: part.id,
-        partNumber: part.partNumber,
-        name: part.name,
-        category: part.category,
-        uom: part.uom,
-      }
+    ? vis.parts.has(part.id)
+      ? {
+          id: part.id,
+          partNumber: part.partNumber,
+          name: part.name,
+          category: part.category,
+          uom: part.uom,
+        }
+      : { ...REDACTED }
     : null;
 
-function toNcrSummary(ncr: NcrRow): NcrSummaryDto {
+function toNcrSummary(ncr: NcrRow, vis: QualityVisibility): NcrSummaryDto {
   return {
     id: ncr.id,
     ncrNumber: ncr.ncrNumber,
@@ -129,27 +171,45 @@ function toNcrSummary(ncr: NcrRow): NcrSummaryDto {
     severity: ncr.severity,
     status: ncr.status,
     disposition: ncr.disposition,
-    part: toPartRef(ncr.part),
+    part: toPartRef(ncr.part, vis),
     createdBy: { id: ncr.createdBy.id, name: ncr.createdBy.name },
     createdAt: ncr.createdAt.toISOString(),
     capa: ncr.capa ? { id: ncr.capa.id, capaNumber: ncr.capa.capaNumber } : null,
   };
 }
 
-function toNcrDetail(ncr: NcrRow): NcrDetailDto {
+function toNcrDetail(ncr: NcrRow, vis: QualityVisibility): NcrDetailDto {
+  const partVisible = ncr.partId !== null && vis.parts.has(ncr.partId);
   return {
-    ...toNcrSummary(ncr),
+    ...toNcrSummary(ncr, vis),
     description: ncr.description,
     quantityAffected: ncr.quantityAffected,
     lotOrSerial: ncr.lotOrSerial,
+    buildUnitId: ncr.buildUnitId,
+    buildUnit: ncr.buildUnit
+      ? {
+          id: ncr.buildUnit.id,
+          identifier: vis.units.has(ncr.buildUnit.id)
+            ? ncr.buildUnit.identifier
+            : REDACTED.name,
+          kind: ncr.buildUnit.kind,
+          status: ncr.buildUnit.status,
+        }
+      : null,
     partRevision: ncr.partRevision
       ? {
           id: ncr.partRevision.id,
-          revision: ncr.partRevision.revision,
+          revision: partVisible ? ncr.partRevision.revision : REDACTED.name,
           lifecycle: ncr.partRevision.lifecycle,
         }
       : null,
-    ecn: ncr.ecn ? { id: ncr.ecn.id, ecnNumber: ncr.ecn.ecnNumber, status: ncr.ecn.status } : null,
+    ecn: ncr.ecn
+      ? {
+          id: ncr.ecn.id,
+          ecnNumber: vis.ecns.has(ncr.ecn.id) ? ncr.ecn.ecnNumber : REDACTED.name,
+          status: ncr.ecn.status,
+        }
+      : null,
     closedBy: ncr.closedBy ? { id: ncr.closedBy.id, name: ncr.closedBy.name } : null,
     closedAt: ncr.closedAt ? ncr.closedAt.toISOString() : null,
   };
@@ -168,7 +228,7 @@ function toCapaSummary(capa: CapaRow): CapaSummaryDto {
   };
 }
 
-function toCapaDetail(capa: CapaRow): CapaDetailDto {
+function toCapaDetail(capa: CapaRow, vis: QualityVisibility): CapaDetailDto {
   return {
     ...toCapaSummary(capa),
     problem: capa.problem,
@@ -179,20 +239,20 @@ function toCapaDetail(capa: CapaRow): CapaDetailDto {
     verifiedAt: capa.verifiedAt ? capa.verifiedAt.toISOString() : null,
     closedAt: capa.closedAt ? capa.closedAt.toISOString() : null,
     createdBy: { id: capa.createdBy.id, name: capa.createdBy.name },
-    nonconformances: capa.nonconformances.map(toNcrSummary),
+    nonconformances: capa.nonconformances.map((ncr) => toNcrSummary(ncr, vis)),
   };
 }
 
-async function getNcrOrThrow(id: number): Promise<NcrDetailDto> {
+async function getNcrOrThrow(id: number, user: AclUser): Promise<NcrDetailDto> {
   const ncr = await prisma.nonconformance.findUnique({ where: { id }, include: ncrInclude });
   if (!ncr) throw new HttpError(404, 'Nonconformance not found');
-  return toNcrDetail(ncr);
+  return toNcrDetail(ncr, await qualityVisibility([ncr], user));
 }
 
-async function getCapaOrThrow(id: number): Promise<CapaDetailDto> {
+async function getCapaOrThrow(id: number, user: AclUser): Promise<CapaDetailDto> {
   const capa = await prisma.correctiveAction.findUnique({ where: { id }, include: capaInclude });
   if (!capa) throw new HttpError(404, 'Corrective action not found');
-  return toCapaDetail(capa);
+  return toCapaDetail(capa, await qualityVisibility(capa.nonconformances, user));
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +262,11 @@ async function getCapaOrThrow(id: number): Promise<CapaDetailDto> {
 function currentUserId(req: Request): number {
   if (!req.user) throw new HttpError(401, 'Not authenticated');
   return req.user.id;
+}
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
 }
 
 function requireBody(req: Request): Record<string, unknown> {
@@ -249,6 +314,19 @@ function parseEnum<T extends Record<string, string>>(
   return value as T[keyof T];
 }
 
+/**
+ * Rule U7 — an NCR may point at a tracked unit; 400 rather than 404 because the id is one
+ * field of a larger write. The free-text `lotOrSerial` is independent and untouched.
+ */
+async function assertBuildUnitExists(buildUnitId: number, user: AclUser): Promise<void> {
+  // Acl-filtered: a restricted unit answers exactly like a nonexistent one (rule X2).
+  const unit = await prisma.buildUnit.findFirst({
+    where: { id: buildUnitId, ...(aclFilter('BUILD_UNIT', user) as Prisma.BuildUnitWhereInput) },
+    select: { id: true },
+  });
+  if (!unit) throw new HttpError(400, 'buildUnitId does not reference an existing build unit');
+}
+
 function parseDate(value: unknown, label: string): Date | null {
   if (value === null) return null;
   if (typeof value !== 'string') throw new HttpError(400, `${label} must be an ISO date or null`);
@@ -258,11 +336,14 @@ function parseDate(value: unknown, label: string): Date | null {
 }
 
 /** Scan-max numbering, matching generatePartNumber's approach. */
-async function nextNumber(prefix: 'NCR' | 'CAPA'): Promise<string> {
+async function nextNumber(
+  prefix: 'NCR' | 'CAPA',
+  db: Prisma.TransactionClient = prisma
+): Promise<string> {
   const table = prefix === 'NCR' ? 'Nonconformance' : 'CorrectiveAction';
   const column = prefix === 'NCR' ? 'ncrNumber' : 'capaNumber';
   const offset = prefix.length + 2; // SUBSTRING is 1-based, skip "PREFIX-"
-  const rows = await prisma.$queryRawUnsafe<{ max: number | null }[]>(
+  const rows = await db.$queryRawUnsafe<{ max: number | null }[]>(
     `SELECT MAX(SUBSTRING("${column}" FROM ${offset})::int) AS max
      FROM "${table}" WHERE "${column}" ~ '^${prefix}-[0-9]{1,9}$'`
   );
@@ -271,16 +352,20 @@ async function nextNumber(prefix: 'NCR' | 'CAPA'): Promise<string> {
 
 async function createWithNumber<T>(
   prefix: 'NCR' | 'CAPA',
-  create: (num: string) => Promise<T>
+  create: (num: string, db: Prisma.TransactionClient) => Promise<T>
 ): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await create(await nextNumber(prefix));
-    } catch (err) {
-      if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
-      throw err;
+  // Allocation is serialized so a concurrent burst queues instead of every caller
+  // reading the same maximum; the retry below is only a backstop.
+  return withNumberLock(async (tx) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await create(await nextNumber(prefix, tx), tx);
+      } catch (err) {
+        if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
+        throw err;
+      }
     }
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +398,8 @@ router.get(
         include: ncrInclude,
       }),
     ]);
-    res.json({ items: rows.map(toNcrSummary), total, page, pageSize });
+    const vis = await qualityVisibility(rows, aclUser(req));
+    res.json({ items: rows.map((row) => toNcrSummary(row, vis)), total, page, pageSize });
   })
 );
 
@@ -335,6 +421,8 @@ router.post(
     const partRevisionId =
       body.partRevisionId === undefined ? null : optionalId(body.partRevisionId, 'partRevisionId');
     const lotOrSerial = body.lotOrSerial === undefined ? null : optionalText(body.lotOrSerial, 'lotOrSerial');
+    const buildUnitId =
+      body.buildUnitId === undefined ? null : optionalId(body.buildUnitId, 'buildUnitId');
 
     let quantityAffected: number | null = null;
     if (body.quantityAffected !== undefined && body.quantityAffected !== null) {
@@ -346,12 +434,19 @@ router.post(
     }
 
     if (partId !== null) {
-      const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+      // A restricted part answers like a missing one (rule X2).
+      const part = await prisma.part.findFirst({
+        where: { id: partId, ...(aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput) },
+        select: { id: true },
+      });
       if (!part) throw new HttpError(404, 'Part not found');
     }
     if (partRevisionId !== null) {
-      const rev = await prisma.partRevision.findUnique({
-        where: { id: partRevisionId },
+      const rev = await prisma.partRevision.findFirst({
+        where: {
+          id: partRevisionId,
+          part: aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput,
+        },
         select: { partId: true },
       });
       if (!rev) throw new HttpError(404, 'Revision not found');
@@ -359,9 +454,10 @@ router.post(
         throw new HttpError(400, 'partRevisionId does not belong to the given part');
       }
     }
+    if (buildUnitId !== null) await assertBuildUnitExists(buildUnitId, aclUser(req));
 
-    const created = await createWithNumber('NCR', (ncrNumber) =>
-      prisma.nonconformance.create({
+    const created = await createWithNumber('NCR', (ncrNumber, tx) =>
+      tx.nonconformance.create({
         data: {
           ncrNumber,
           title,
@@ -371,19 +467,20 @@ router.post(
           partRevisionId,
           quantityAffected,
           lotOrSerial,
+          buildUnitId,
           createdById: userId,
         },
         select: { id: true },
       })
     );
-    res.status(201).json(await getNcrOrThrow(created.id));
+    res.status(201).json(await getNcrOrThrow(created.id, aclUser(req)));
   })
 );
 
 router.get(
   '/ncrs/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getNcrOrThrow(idParam(req.params.id)));
+    res.json(await getNcrOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -417,6 +514,11 @@ router.patch(
           : parseEnum(body.disposition, EcnDisposition, 'disposition');
     }
     if (body.lotOrSerial !== undefined) data.lotOrSerial = optionalText(body.lotOrSerial, 'lotOrSerial');
+    if (body.buildUnitId !== undefined) {
+      const buildUnitId = optionalId(body.buildUnitId, 'buildUnitId');
+      if (buildUnitId !== null) await assertBuildUnitExists(buildUnitId, aclUser(req));
+      data.buildUnitId = buildUnitId;
+    }
     if (body.quantityAffected !== undefined) {
       if (body.quantityAffected === null) data.quantityAffected = null;
       else {
@@ -440,7 +542,7 @@ router.patch(
     }
 
     await prisma.nonconformance.update({ where: { id }, data });
-    res.json(await getNcrOrThrow(id));
+    res.json(await getNcrOrThrow(id, aclUser(req)));
   })
 );
 
@@ -501,7 +603,7 @@ router.post(
         `Cannot ${action}: NCR ${ncr.ncrNumber} was changed concurrently — reload and try again`
       );
     }
-    res.json(await getNcrOrThrow(id));
+    res.json(await getNcrOrThrow(id, aclUser(req)));
   })
 );
 
@@ -521,6 +623,7 @@ router.post(
     const id = idParam(req.params.id);
     const userId = currentUserId(req);
 
+    const user = aclUser(req);
     const ncr = await prisma.nonconformance.findUnique({
       where: { id },
       include: { part: { select: { id: true, partNumber: true } } },
@@ -529,6 +632,12 @@ router.post(
     if (ncr.ecnId !== null) throw new HttpError(409, 'This NCR already has an ECN');
     if (ncr.partId === null || !ncr.part) {
       throw new HttpError(409, 'Set the affected part before raising an ECN');
+    }
+    // Raising a change against a part is naming it on an ECN — the caller must be able to
+    // read it, and a restricted part answers as if the NCR had none they can act on.
+    const visibleParts = await visibleIds('PART', [ncr.partId], user);
+    if (!visibleParts.has(ncr.partId)) {
+      throw new HttpError(404, 'Part not found');
     }
     const partId = ncr.partId;
     const part = ncr.part;
@@ -540,15 +649,24 @@ router.post(
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('turboplm-ecn-membership'))::text`;
           const elsewhere = await tx.ecnItem.findFirst({
             where: { partId, ecn: { status: { in: ACTIVE_ECN } } },
-            include: { ecn: { select: { ecnNumber: true } } },
+            include: { ecn: { select: { id: true, ecnNumber: true } } },
           });
           if (elsewhere) {
+            // The rule holds either way; a restricted ECN's number stays out of the message.
+            const visibleEcns = await visibleIds('ECN', [elsewhere.ecn.id], user);
             throw new HttpError(
               409,
-              `Part ${part.partNumber} is already on active ECN ${elsewhere.ecn.ecnNumber}`
+              visibleEcns.has(elsewhere.ecn.id)
+                ? `Part ${part.partNumber} is already on active ECN ${elsewhere.ecn.ecnNumber}`
+                : `Part ${part.partNumber} is already on an active restricted ECN`
             );
           }
 
+          // Take the numbering lock before the scan, exactly as POST /ecns does. Without it
+          // this path and that one can read the same maximum and one of them fails on the
+          // unique constraint — and a P2002 raised inside an interactive transaction cannot
+          // be retried, because the surrounding Postgres transaction is already aborted.
+          await lockNumbering(tx);
           const rows = await tx.$queryRaw<{ max: number | null }[]>`
             SELECT MAX(SUBSTRING("ecnNumber" FROM 5)::int) AS max
             FROM "Ecn" WHERE "ecnNumber" ~ '^ECN-[0-9]{1,9}$'`;
@@ -594,7 +712,7 @@ router.post(
       }
     }
 
-    res.json(await getNcrOrThrow(id));
+    res.json(await getNcrOrThrow(id, aclUser(req)));
   })
 );
 
@@ -639,8 +757,8 @@ router.post(
     if (!owner) throw new HttpError(404, 'Owner not found');
     const dueDate = body.dueDate === undefined ? null : parseDate(body.dueDate, 'dueDate');
 
-    const created = await createWithNumber('CAPA', (capaNumber) =>
-      prisma.correctiveAction.create({
+    const created = await createWithNumber('CAPA', (capaNumber, tx) =>
+      tx.correctiveAction.create({
         data: { capaNumber, title, problem, ownerId, dueDate, createdById: userId },
         select: { id: true },
       })
@@ -655,14 +773,14 @@ router.post(
       }).catch((err) => console.error('CAPA notify failed:', err));
     }
 
-    res.status(201).json(await getCapaOrThrow(created.id));
+    res.status(201).json(await getCapaOrThrow(created.id, aclUser(req)));
   })
 );
 
 router.get(
   '/capas/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getCapaOrThrow(idParam(req.params.id)));
+    res.json(await getCapaOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -699,7 +817,7 @@ router.patch(
     }
 
     await prisma.correctiveAction.update({ where: { id }, data });
-    res.json(await getCapaOrThrow(id));
+    res.json(await getCapaOrThrow(id, aclUser(req)));
   })
 );
 
@@ -766,7 +884,7 @@ router.post(
         `Cannot ${action}: CAPA ${capa.capaNumber} was changed concurrently — reload and try again`
       );
     }
-    res.json(await getCapaOrThrow(id));
+    res.json(await getCapaOrThrow(id, aclUser(req)));
   })
 );
 

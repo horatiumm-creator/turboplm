@@ -1,8 +1,37 @@
+import { ACL_SEGMENTS } from './types';
 import type {
+  AclEntityType,
+  AclPermission,
+  AccessGroupDetail,
+  AccessGroupSummary,
+  ItemAccess,
+  MaterialClass,
+  MaterialDetail,
+  MaterialForm,
+  MaterialRequirements,
+  MaterialSummary,
+  PartMaterial,
+
   AmlStatus,
   AnalyticsKpis,
   ApiKeyCreated,
+  BomReconciliation,
+  CadAssembly,
+  CadBomProposal,
+  CadStructureDiff,
+  CbomReconciliation,
+  PortalIdentity,
+  PortalRfqDetail,
+  PortalRfqSummary,
+  RfqInvitation,
+  SupplierUserAccount,
+  SupplierUserWithInvite,
+  SignatureManifest,
+  SignatureMeaning,
+  SignatureRequirement,
+  SignedEntityType,
   ApiKeySummary,
+  AsMaintained,
   AttributeDef,
   AttributeType,
   AuditEntry,
@@ -14,12 +43,25 @@ import type {
   BomLineAlternateDetail,
   BomLineDetail,
   BomTreeNode,
+  BuildKind,
+  BuildStatus,
+  BuildUnitDetail,
+  BuildUnitSummary,
+  BuildUnitTransitionAction,
   CapaDetail,
   CapaStatus,
   CapaSummary,
+  CatalogFormat,
+  CatalogImportDetail,
+  CatalogImportRow,
+  CatalogImportSummary,
+  CatalogMapping,
+  CatalogRowStatus,
+  CatalogTargetField,
   CostRollup,
   DashboardStats,
   DeliverableStatus,
+  DeviationReport,
   DocumentCategory,
   DocumentDetail,
   DocumentSummary,
@@ -39,10 +81,16 @@ import type {
   EcrSummary,
   EmailStatus,
   EntityDocument,
+  GenealogyNode,
   ImportResult,
   Lifecycle,
   ManufacturerPartDetail,
   ManufacturerSummary,
+  MarkupComment,
+  MarkupDetail,
+  MarkupKind,
+  MarkupStatus,
+  MarkupTransition,
   MyWork,
   NcrDetail,
   NcrSeverity,
@@ -72,6 +120,11 @@ import type {
   RfqSummary,
   Role,
   SearchResults,
+  ServiceKind,
+  ServiceRecordDetail,
+  ServiceRecordSummary,
+  ServiceStatus,
+  ServiceTransition,
   SupplierSummary,
   TransitionAction,
   UserInfo,
@@ -79,6 +132,7 @@ import type {
   VariantResolution,
   WebhookCreated,
   WebhookSummary,
+  WhereConsumedResult,
   WhereUsedEntry,
   WorkflowRule,
   WorkflowTemplateDetail,
@@ -91,8 +145,11 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options?: RequestInit & { json?: unknown }): Promise<T> {
-  const { json, ...rest } = options ?? {};
+async function request<T>(
+  path: string,
+  options?: RequestInit & { json?: unknown; keepSessionOn401?: boolean }
+): Promise<T> {
+  const { json, keepSessionOn401, ...rest } = options ?? {};
   const res = await fetch(`/api${path}`, {
     credentials: 'include',
     headers: json !== undefined ? { 'Content-Type': 'application/json' } : undefined,
@@ -106,8 +163,12 @@ async function request<T>(path: string, options?: RequestInit & { json?: unknown
     // handle their own 401s, e.g. a wrong password).
     // Background notification polling must never force a navigation — a session
     // that expires mid-edit would otherwise discard unsaved work on the next poll.
+    // `keepSessionOn401` marks calls that re-authenticate the *current* user — signing,
+    // for instance. A wrong password there is a rejected credential, not a dead session,
+    // and bouncing to /login would throw the user off the page they were working on.
     if (
       res.status === 401 &&
+      !keepSessionOn401 &&
       !path.startsWith('/auth/') &&
       !path.startsWith('/notifications') &&
       window.location.pathname !== '/login'
@@ -257,12 +318,25 @@ export const deleteOperation = (opId: number) =>
   request<void>(`/operations/${opId}`, { method: 'DELETE' });
 export const addOperationMaterial = (
   opId: number,
-  input: { partId: number; quantity: number; uom?: string; notes?: string }
+  input: {
+    partId: number;
+    quantity: number;
+    uom?: string;
+    notes?: string;
+    scrapFactor?: number;
+    consumable?: boolean;
+  }
 ) =>
   request<OperationMaterialDetail>(`/operations/${opId}/materials`, { method: 'POST', json: input });
 export const updateOperationMaterial = (
   materialId: number,
-  patch: { quantity?: number; uom?: string; notes?: string | null }
+  patch: {
+    quantity?: number;
+    uom?: string;
+    notes?: string | null;
+    scrapFactor?: number;
+    consumable?: boolean;
+  }
 ) =>
   request<OperationMaterialDetail>(`/operation-materials/${materialId}`, {
     method: 'PATCH',
@@ -295,6 +369,8 @@ export interface CreateEcnInput {
   reason?: string;
   priority?: EcnPriority;
   effectivityDate?: string;
+  /** By date or by unit, never both (rule U6) — sending both is a 400. */
+  effectiveFromSerial?: string;
 }
 
 export const createEcn = (input: CreateEcnInput) =>
@@ -308,6 +384,8 @@ export const updateEcn = (
     reason?: string | null;
     priority?: EcnPriority;
     effectivityDate?: string | null;
+    /** Editable while DRAFT or IN_REVIEW; clear the other field to switch cut-in modes. */
+    effectiveFromSerial?: string | null;
   }
 ) => request<EcnDetail>(`/ecns/${id}`, { method: 'PATCH', json: patch });
 export const deleteEcn = (id: number) => request<void>(`/ecns/${id}`, { method: 'DELETE' });
@@ -427,6 +505,30 @@ export const getRevisionDocuments = (revisionId: number) =>
   request<EntityDocument[]>(`/revisions/${revisionId}/documents`);
 export const getEcnDocuments = (ecnId: number) =>
   request<EntityDocument[]>(`/ecns/${ecnId}/documents`);
+
+// ---- document vault: check-out and check-in (rules D1–D2) ----
+/**
+ * Take the lock. Re-checking out your own lock is idempotent and refreshes the expiry;
+ * 409 `<docNumber> is checked out by <name>` when someone else holds a live one.
+ */
+export const checkoutDocument = (id: number, note?: string) =>
+  request<DocumentDetail>(`/documents/${id}/checkout`, { method: 'POST', json: { note } });
+/**
+ * Create the next version and release the lock in one transaction. Multipart, like
+ * `addDocumentVersion`; 409 `<docNumber> is not checked out by you`.
+ */
+export const checkinDocument = (id: number, file: File, note?: string) => {
+  const form = new FormData();
+  form.set('file', file);
+  if (note) form.set('note', note);
+  return requestForm<DocumentDetail>(`/documents/${id}/checkin`, form);
+};
+/** Release without producing a version. The holder, or an ADMIN. */
+export const cancelDocumentCheckout = (id: number) =>
+  request<DocumentDetail>(`/documents/${id}/cancel-checkout`, { method: 'POST' });
+/** ADMIN only. `reason` is required and is kept in the lock note so the trail explains itself. */
+export const breakDocumentLock = (id: number, reason: string) =>
+  request<DocumentDetail>(`/documents/${id}/break-lock`, { method: 'POST', json: { reason } });
 
 // ---- ECRs ----
 export const listEcrs = (
@@ -750,6 +852,41 @@ export const documentVersionGlbUrl = (versionId: number) =>
 export const convertDocumentVersion = (versionId: number) =>
   request<DocumentVersionDetail>(`/document-versions/${versionId}/convert`, { method: 'POST' });
 
+// ---- CAD-driven BOM and eBOM/mBOM reconciliation ----
+/** Product hierarchy of a CAD version, with each node matched to a part where possible. */
+export const getCadAssembly = (versionId: number) =>
+  request<CadAssembly>(`/document-versions/${versionId}/assembly`);
+/** Re-run extraction for this CAD version and return the fresh snapshot. */
+export const refreshCadAssembly = (versionId: number) =>
+  request<CadAssembly>(`/document-versions/${versionId}/assembly/refresh`, { method: 'POST' });
+/** cBOM vs cBOM: what changed in the model between two CAD versions. */
+export const getCadDiff = (fromVersionId: number, toVersionId: number) =>
+  request<CadStructureDiff>(`/document-versions/${fromVersionId}/cad-diff/${toVersionId}`);
+/** cBOM vs eBOM: does what was modelled match what engineering released? */
+export const getCbomReconciliation = (revisionId: number, documentVersionId?: number) => {
+  const qs = documentVersionId ? `?documentVersionId=${documentVersionId}` : '';
+  return request<CbomReconciliation>(`/revisions/${revisionId}/cbom-reconciliation${qs}`);
+};
+/**
+ * Diff a CAD assembly's top level against this revision's eBOM. Omit `apply` for a dry
+ * run — nothing is written and the revision need not be IN_WORK.
+ */
+export const bomFromCad = (
+  revisionId: number,
+  input: {
+    documentVersionId: number;
+    apply?: boolean;
+    removeMissing?: boolean;
+    createMissingParts?: boolean;
+    /** Import the whole tree, each sub-assembly into its own part's In Work revision. */
+    recursive?: boolean;
+  }
+) => request<CadBomProposal>(`/revisions/${revisionId}/bom-from-cad`, { method: 'POST', json: input });
+export const generatePlanFromBom = (revisionId: number) =>
+  request<ProcessPlanDetail>(`/revisions/${revisionId}/process-plan/from-bom`, { method: 'POST' });
+export const getBomReconciliation = (revisionId: number) =>
+  request<BomReconciliation>(`/revisions/${revisionId}/bom-reconciliation`);
+
 // ---- quality: nonconformance ----
 export const listNcrs = (params: { status?: NcrStatus; search?: string; page?: number; pageSize?: number } = {}) => {
   const qs = new URLSearchParams();
@@ -767,6 +904,8 @@ export const createNcr = (input: {
   partRevisionId?: number;
   quantityAffected?: number;
   lotOrSerial?: string;
+  /** Links the NCR to a tracked unit (rule U7); `lotOrSerial` remains free text. */
+  buildUnitId?: number;
 }) => request<NcrDetail>('/ncrs', { method: 'POST', json: input });
 export const getNcr = (id: number) => request<NcrDetail>(`/ncrs/${id}`);
 export const updateNcr = (
@@ -778,6 +917,7 @@ export const updateNcr = (
     disposition?: EcnDisposition | null;
     quantityAffected?: number | null;
     lotOrSerial?: string | null;
+    buildUnitId?: number | null;
     capaId?: number | null;
   }
 ) => request<NcrDetail>(`/ncrs/${id}`, { method: 'PATCH', json: patch });
@@ -913,3 +1053,526 @@ export const awardRfqLine = (lineId: number, supplierId: number) =>
 
 // ---- dashboard ----
 export const getStats = () => request<DashboardStats>('/stats');
+
+// ---- electronic signatures ----
+const SIGN_PATHS: Record<SignedEntityType, string> = {
+  ECN: 'ecns',
+  REVISION: 'revisions',
+  DOCUMENT: 'documents',
+};
+export const getSignatureManifest = (entityType: SignedEntityType, entityId: number) =>
+  request<SignatureManifest>(`/${SIGN_PATHS[entityType]}/${entityId}/signatures`);
+/**
+ * Execute a signature. Accounts with a password send `password`; SSO-only accounts have
+ * none and send `confirmEmail` instead. Returns the refreshed manifest.
+ */
+export const signEntity = (
+  entityType: SignedEntityType,
+  entityId: number,
+  input: { meaning: SignatureMeaning; password?: string; confirmEmail?: string; comment?: string }
+) =>
+  request<SignatureManifest>(`/${SIGN_PATHS[entityType]}/${entityId}/signatures`, {
+    method: 'POST',
+    json: input,
+    keepSessionOn401: true,
+  });
+export const listSignatureRequirements = (entityType?: SignedEntityType) =>
+  request<SignatureRequirement[]>(
+    `/signature-requirements${entityType ? `?entityType=${entityType}` : ''}`
+  );
+export const createSignatureRequirement = (input: {
+  entityType: SignedEntityType;
+  meaning: SignatureMeaning;
+  seq?: number;
+  role?: Role;
+  userId?: number;
+}) => request<SignatureRequirement>('/signature-requirements', { method: 'POST', json: input });
+export const updateSignatureRequirement = (
+  id: number,
+  patch: { active?: boolean; seq?: number; role?: Role | null; userId?: number | null }
+) =>
+  request<SignatureRequirement>(`/signature-requirements/${id}`, { method: 'PATCH', json: patch });
+export const deleteSignatureRequirement = (id: number) =>
+  request<void>(`/signature-requirements/${id}`, { method: 'DELETE' });
+
+// ---- supplier portal: internal side ----
+export const listSupplierUsers = (supplierId: number) =>
+  request<SupplierUserAccount[]>(`/suppliers/${supplierId}/users`);
+export const createSupplierUser = (supplierId: number, input: { email: string; name: string }) =>
+  request<SupplierUserWithInvite>(`/suppliers/${supplierId}/users`, { method: 'POST', json: input });
+export const resetSupplierInvite = (id: number) =>
+  request<SupplierUserWithInvite>(`/supplier-users/${id}/reset-invite`, { method: 'POST' });
+export const updateSupplierUser = (id: number, patch: { active?: boolean; name?: string }) =>
+  request<SupplierUserAccount>(`/supplier-users/${id}`, { method: 'PATCH', json: patch });
+export const listRfqInvitations = (rfqId: number) =>
+  request<RfqInvitation[]>(`/rfqs/${rfqId}/invitations`);
+export const inviteSupplier = (rfqId: number, supplierId: number) =>
+  request<RfqInvitation>(`/rfqs/${rfqId}/invitations`, { method: 'POST', json: { supplierId } });
+export const revokeInvitation = (id: number) =>
+  request<void>(`/rfq-invitations/${id}`, { method: 'DELETE' });
+
+// ---- supplier portal: portal side ----
+// These carry the portal cookie, not the internal one, and must never trigger the
+// internal session-expiry redirect.
+export const portalLogin = (email: string, password: string) =>
+  request<PortalIdentity>('/portal/login', {
+    method: 'POST',
+    json: { email, password },
+    keepSessionOn401: true,
+  });
+export const portalAcceptInvite = (token: string, password: string) =>
+  request<PortalIdentity>('/portal/accept-invite', {
+    method: 'POST',
+    json: { token, password },
+    keepSessionOn401: true,
+  });
+export const portalLogout = () =>
+  request<void>('/portal/logout', { method: 'POST', keepSessionOn401: true });
+export const portalMe = () => request<PortalIdentity>('/portal/me', { keepSessionOn401: true });
+export const portalListRfqs = () =>
+  request<PortalRfqSummary[]>('/portal/rfqs', { keepSessionOn401: true });
+export const portalGetRfq = (id: number) =>
+  request<PortalRfqDetail>(`/portal/rfqs/${id}`, { keepSessionOn401: true });
+export const portalSubmitQuote = (
+  lineId: number,
+  input: { unitPrice: number; currency?: string; leadTimeDays?: number; moq?: number; notes?: string }
+) =>
+  request<PortalRfqDetail>(`/portal/rfq-lines/${lineId}/quotes`, {
+    method: 'POST',
+    json: input,
+    keepSessionOn401: true,
+  });
+export const portalWithdrawQuote = (quoteId: number) =>
+  request<PortalRfqDetail>(`/portal/rfq-quotes/${quoteId}`, {
+    method: 'DELETE',
+    keepSessionOn401: true,
+  });
+
+// ---- build units: serial / lot tracking (rules U1–U3) ----
+export interface ListBuildUnitsParams {
+  kind?: BuildKind;
+  status?: BuildStatus;
+  partId?: number;
+  /** Matches the identifier. */
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export const listBuildUnits = (params: ListBuildUnitsParams = {}) => {
+  const qs = new URLSearchParams();
+  if (params.kind) qs.set('kind', params.kind);
+  if (params.status) qs.set('status', params.status);
+  if (params.partId) qs.set('partId', String(params.partId));
+  if (params.search) qs.set('search', params.search);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+  return request<Paged<BuildUnitSummary>>(`/build-units${qs.toString() ? `?${qs}` : ''}`);
+};
+
+export interface CreateBuildUnitInput {
+  kind: BuildKind;
+  /** Omit to have the server generate `SN-10001` / `LOT-10001` upwards. */
+  identifier?: string;
+  partId: number;
+  /** Must belong to `partId` and be RELEASED — production is not built to a draft. */
+  partRevisionId: number;
+  /** SERIAL requires exactly 1; LOT requires > 0. */
+  quantity?: number;
+  notes?: string;
+}
+
+export const createBuildUnit = (input: CreateBuildUnitInput) =>
+  request<BuildUnitDetail>('/build-units', { method: 'POST', json: input });
+export const getBuildUnit = (id: number) => request<BuildUnitDetail>(`/build-units/${id}`);
+/** Rejected with 409 once the unit is SHIPPED or SCRAPPED. */
+export const updateBuildUnit = (
+  id: number,
+  patch: {
+    identifier?: string;
+    partRevisionId?: number;
+    quantity?: number;
+    notes?: string | null;
+  }
+) => request<BuildUnitDetail>(`/build-units/${id}`, { method: 'PATCH', json: patch });
+export const transitionBuildUnit = (id: number, action: BuildUnitTransitionAction) =>
+  request<BuildUnitDetail>(`/build-units/${id}/transition`, { method: 'POST', json: { action } });
+
+/**
+ * Record that `childId` went into this unit. The parent must be IN_PROGRESS and the child
+ * COMPLETED or SHIPPED. Omitting `bomLineId` records an unplanned consumption, which is
+ * allowed — the point is to capture what actually happened.
+ */
+export const addAsBuiltLine = (
+  id: number,
+  input: { childId: number; quantity: number; bomLineId?: number }
+) => request<BuildUnitDetail>(`/build-units/${id}/as-built`, { method: 'POST', json: input });
+export const deleteAsBuiltLine = (lineId: number) =>
+  request<void>(`/as-built-lines/${lineId}`, { method: 'DELETE' });
+
+// ---- traceability: genealogy, recall and deviations (rules U4–U5) ----
+/** Backward trace: what went into this unit, recursively. */
+export const getBuildUnitGenealogy = (id: number) =>
+  request<GenealogyNode>(`/build-units/${id}/genealogy`);
+/** Forward trace: every unit this one ended up in — the recall query. */
+export const getBuildUnitWhereConsumed = (id: number) =>
+  request<WhereConsumedResult>(`/build-units/${id}/where-consumed`);
+/** As-built vs as-designed: the unit's consumption against the eBOM of its revision. */
+export const getBuildUnitDeviations = (id: number) =>
+  request<DeviationReport>(`/build-units/${id}/deviations`);
+
+// ---- vendor catalog import ----
+
+/**
+ * Stages the file and every source row verbatim; nothing is written to Part, Manufacturer or
+ * ManufacturerPart until commit. 400 `Unsupported file type` for anything but
+ * .csv/.tsv/.xlsx/.xml, 400 `The file has no data rows` for a header-only file, 413 over 25 MB.
+ */
+export const uploadCatalogImport = (file: File) => {
+  const form = new FormData();
+  form.set('file', file);
+  return requestForm<CatalogImportDetail>('/catalog-imports', form);
+};
+
+export const listCatalogImports = (params: { page?: number; pageSize?: number } = {}) => {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set('page', String(params.page));
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request<Paged<CatalogImportSummary>>(`/catalog-imports${suffix}`);
+};
+
+export const getCatalogImport = (id: number) =>
+  request<CatalogImportDetail>(`/catalog-imports/${id}`);
+
+/** 409 once the import is COMMITTED: it is the record of what entered the system. */
+export const deleteCatalogImport = (id: number) =>
+  request<void>(`/catalog-imports/${id}`, { method: 'DELETE' });
+
+export interface ValidateCatalogImportInput {
+  /** A saved mapping to apply. */
+  mappingId?: number;
+  /** Target field -> source column name. `name` and `mpn` are the only required targets. */
+  fieldMap?: Partial<Record<CatalogTargetField, string>>;
+  /** Literal values for fields the file does not carry, e.g. { category: 'PURCHASED' }. */
+  defaults?: Partial<Record<CatalogTargetField, string>>;
+}
+
+/**
+ * Classifies every row and moves the import to VALIDATED. Re-runnable with a different
+ * mapping — each run replaces the previous classification and still writes nothing.
+ */
+export const validateCatalogImport = (id: number, input: ValidateCatalogImportInput = {}) =>
+  request<CatalogImportDetail>(`/catalog-imports/${id}/validate`, { method: 'POST', json: input });
+
+export interface CommitCatalogImportInput {
+  /** Without it, rows naming an unknown manufacturer fail individually and the rest commit. */
+  createMissingManufacturers?: boolean;
+  /** Without it, UPDATE rows are left untouched; only NEW rows are written. */
+  updateExisting?: boolean;
+}
+
+/**
+ * 409 unless the import is VALIDATED. Partial success is honest: status COMMITTED with a
+ * non-zero `counts.failed` when only some eligible rows landed, FAILED when none did.
+ */
+export const commitCatalogImport = (id: number, input: CommitCatalogImportInput = {}) =>
+  request<CatalogImportDetail>(`/catalog-imports/${id}/commit`, { method: 'POST', json: input });
+
+export const listCatalogImportRows = (
+  id: number,
+  params: { status?: CatalogRowStatus; page?: number; pageSize?: number } = {}
+) => {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set('status', params.status);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request<Paged<CatalogImportRow>>(`/catalog-imports/${id}/rows${suffix}`);
+};
+
+/** Per-row skip in the preview step; `NEW` puts a skipped row back in the commit. */
+export const updateCatalogImportRow = (id: number, status: 'SKIPPED' | 'NEW') =>
+  request<CatalogImportRow>(`/catalog-import-rows/${id}`, { method: 'PATCH', json: { status } });
+
+// ---- vendor catalog mappings ----
+
+export const listCatalogMappings = () => request<CatalogMapping[]>('/catalog-mappings');
+
+export interface CreateCatalogMappingInput {
+  name: string;
+  vendor?: string;
+  format: CatalogFormat;
+  fieldMap?: Partial<Record<CatalogTargetField, string>>;
+  defaults?: Partial<Record<CatalogTargetField, string>>;
+  /** The header signature that identifies this vendor's export. */
+  headerSignature?: string[];
+  /** Seeds `fieldMap` from that import — the normal path to a house mapping. */
+  fromImportId?: number;
+}
+
+export const createCatalogMapping = (input: CreateCatalogMappingInput) =>
+  request<CatalogMapping>('/catalog-mappings', { method: 'POST', json: input });
+
+/** 409 `<name> is a built-in mapping`: the seeded presets are read-only. */
+export const updateCatalogMapping = (
+  id: number,
+  patch: {
+    name?: string;
+    vendor?: string | null;
+    format?: CatalogFormat;
+    fieldMap?: Partial<Record<CatalogTargetField, string>>;
+    defaults?: Partial<Record<CatalogTargetField, string>> | null;
+    headerSignature?: string[];
+  }
+) => request<CatalogMapping>(`/catalog-mappings/${id}`, { method: 'PATCH', json: patch });
+
+export const deleteCatalogMapping = (id: number) =>
+  request<void>(`/catalog-mappings/${id}`, { method: 'DELETE' });
+
+// ---- design review markup (rules K1–K4) ----
+
+/** Oldest first, each with its comment thread. */
+export const listMarkups = (documentVersionId: number, status?: MarkupStatus) =>
+  request<MarkupDetail[]>(
+    `/document-versions/${documentVersionId}/markups${status ? `?status=${status}` : ''}`
+  );
+
+export interface CreateMarkupInput {
+  kind: MarkupKind;
+  /**
+   * Shape is fixed by `kind` (rule K1): `PIN_3D` a point plus the camera, `BOX_2D` /
+   * `POINT_2D` normalized 0–1 coordinates, `NOTE` an empty object. Out-of-range
+   * coordinates are a 400, never clamped.
+   */
+  geometry: Record<string, unknown>;
+  /** The opening comment. Required — an anchor with nothing said is noise. */
+  body: string;
+  page?: number;
+}
+
+export const createMarkup = (documentVersionId: number, input: CreateMarkupInput) =>
+  request<MarkupDetail>(`/document-versions/${documentVersionId}/markups`, {
+    method: 'POST',
+    json: input,
+  });
+/** Author or ADMIN only; `body` edits the opening comment. */
+export const updateMarkup = (
+  id: number,
+  patch: { geometry?: Record<string, unknown>; body?: string }
+) => request<MarkupDetail>(`/markups/${id}`, { method: 'PATCH', json: patch });
+/** Author or ADMIN; takes the thread with it. */
+export const deleteMarkup = (id: number) => request<void>(`/markups/${id}`, { method: 'DELETE' });
+export const addMarkupComment = (id: number, body: string) =>
+  request<MarkupComment>(`/markups/${id}/comments`, { method: 'POST', json: { body } });
+export const transitionMarkup = (id: number, action: MarkupTransition) =>
+  request<MarkupDetail>(`/markups/${id}/transition`, { method: 'POST', json: { action } });
+/** Raise an ECR from the markup and link it; 409 when it already has one. */
+export const escalateMarkup = (id: number) =>
+  request<MarkupDetail>(`/markups/${id}/escalate`, { method: 'POST' });
+/** Still-OPEN markups the caller opened or commented on. */
+export const getMyMarkups = () => request<MarkupDetail[]>('/my-markups');
+
+// ---- service and as-maintained records (rules G1–G4) ----
+
+export interface ListServiceRecordsParams {
+  buildUnitId?: number;
+  status?: ServiceStatus;
+  kind?: ServiceKind;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export const listServiceRecords = (params: ListServiceRecordsParams = {}) => {
+  const qs = new URLSearchParams();
+  if (params.buildUnitId) qs.set('buildUnitId', String(params.buildUnitId));
+  if (params.status) qs.set('status', params.status);
+  if (params.kind) qs.set('kind', params.kind);
+  if (params.search) qs.set('search', params.search);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize));
+  return request<Paged<ServiceRecordSummary>>(
+    `/service-records${qs.toString() ? `?${qs}` : ''}`
+  );
+};
+
+export interface CreateServiceRecordInput {
+  /** Must be SHIPPED or COMPLETED: you do not service something that was never finished. */
+  buildUnitId: number;
+  kind: ServiceKind;
+  title: string;
+  description?: string;
+  reportedAt?: string;
+  technicianId?: number;
+  /** A field failure is often a nonconformance. */
+  ncrId?: number;
+  /** An upgrade usually implements a change. */
+  ecnId?: number;
+}
+
+export const createServiceRecord = (input: CreateServiceRecordInput) =>
+  request<ServiceRecordDetail>('/service-records', { method: 'POST', json: input });
+export const getServiceRecord = (id: number) =>
+  request<ServiceRecordDetail>(`/service-records/${id}`);
+/** Refused once the record is CLOSED. */
+export const updateServiceRecord = (
+  id: number,
+  patch: {
+    kind?: ServiceKind;
+    title?: string;
+    description?: string | null;
+    reportedAt?: string;
+    technicianId?: number | null;
+    ncrId?: number | null;
+    ecnId?: number | null;
+  }
+) => request<ServiceRecordDetail>(`/service-records/${id}`, { method: 'PATCH', json: patch });
+export const transitionServiceRecord = (id: number, action: ServiceTransition) =>
+  request<ServiceRecordDetail>(`/service-records/${id}/transition`, {
+    method: 'POST',
+    json: { action },
+  });
+
+/**
+ * Record a swap, which rewrites the as-built graph (rule G2): the removed unit must currently
+ * sit inside the serviced unit, the installed one must be COMPLETED and unconsumed. At least
+ * one of the two is required.
+ */
+export const addServicePartSwap = (
+  id: number,
+  input: {
+    removedUnitId?: number;
+    installedUnitId?: number;
+    /** Free text, e.g. "left motor". */
+    position?: string;
+    reason: string;
+  }
+) => request<ServiceRecordDetail>(`/service-records/${id}/swaps`, { method: 'POST', json: input });
+export const deleteServicePartSwap = (id: number) =>
+  request<void>(`/service-part-swaps/${id}`, { method: 'DELETE' });
+
+/** Current genealogy plus the change log that explains how it got there, newest first. */
+export const getBuildUnitAsMaintained = (id: number) =>
+  request<AsMaintained>(`/build-units/${id}/as-maintained`);
+export const getBuildUnitServiceHistory = (id: number) =>
+  request<ServiceRecordSummary[]>(`/build-units/${id}/service-history`);
+
+// ---------------------------------------------------------------------------
+// Item-level access control (rules X1-X7)
+// ---------------------------------------------------------------------------
+
+export const getItemAccess = (entityType: AclEntityType, id: number) =>
+  request<ItemAccess>(`/${ACL_SEGMENTS[entityType]}/${id}/access`);
+
+export interface AddItemGrantInput {
+  groupId?: number;
+  userId?: number;
+  permission: AclPermission;
+}
+
+export const addItemGrant = (entityType: AclEntityType, id: number, input: AddItemGrantInput) =>
+  request<ItemAccess>(`/${ACL_SEGMENTS[entityType]}/${id}/access`, {
+    method: 'POST',
+    json: input,
+  });
+
+export const removeItemGrant = (grantId: number) =>
+  request<void>(`/item-grants/${grantId}`, { method: 'DELETE' });
+
+export const listAccessGroups = () => request<AccessGroupSummary[]>('/access-groups');
+
+export const getAccessGroup = (id: number) => request<AccessGroupDetail>(`/access-groups/${id}`);
+
+export const createAccessGroup = (input: { name: string; description?: string | null }) =>
+  request<AccessGroupDetail>('/access-groups', { method: 'POST', json: input });
+
+export const updateAccessGroup = (
+  id: number,
+  input: { name?: string; description?: string | null; active?: boolean }
+) => request<AccessGroupDetail>(`/access-groups/${id}`, { method: 'PATCH', json: input });
+
+export const deleteAccessGroup = (id: number) =>
+  request<void>(`/access-groups/${id}`, { method: 'DELETE' });
+
+export const addAccessGroupMember = (groupId: number, userId: number) =>
+  request<AccessGroupDetail>(`/access-groups/${groupId}/members`, {
+    method: 'POST',
+    json: { userId },
+  });
+
+export const removeAccessGroupMember = (memberId: number) =>
+  request<void>(`/access-group-members/${memberId}`, { method: 'DELETE' });
+
+// ---------------------------------------------------------------------------
+// Materials (rules N2-N3)
+// ---------------------------------------------------------------------------
+
+export interface ListMaterialsParams {
+  search?: string;
+  materialClass?: MaterialClass;
+  active?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export const listMaterials = (params: ListMaterialsParams = {}) => {
+  const query = new URLSearchParams();
+  if (params.search) query.set('search', params.search);
+  if (params.materialClass) query.set('materialClass', params.materialClass);
+  if (params.active !== undefined) query.set('active', String(params.active));
+  if (params.page) query.set('page', String(params.page));
+  if (params.pageSize) query.set('pageSize', String(params.pageSize));
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return request<Paged<MaterialSummary>>(`/materials${suffix}`);
+};
+
+export interface MaterialInput {
+  code?: string;
+  name?: string;
+  materialClass?: MaterialClass;
+  specification?: string | null;
+  density?: number | null;
+  stockUom?: string;
+  unitCost?: number | null;
+  notes?: string | null;
+  active?: boolean;
+}
+
+export const createMaterial = (input: MaterialInput) =>
+  request<MaterialDetail>('/materials', { method: 'POST', json: input });
+
+export const updateMaterial = (id: number, input: MaterialInput) =>
+  request<MaterialDetail>(`/materials/${id}`, { method: 'PATCH', json: input });
+
+export const deleteMaterial = (id: number) =>
+  request<void>(`/materials/${id}`, { method: 'DELETE' });
+
+export const listPartMaterials = (partId: number) =>
+  request<PartMaterial[]>(`/parts/${partId}/materials`);
+
+export interface PartMaterialInput {
+  materialId?: number;
+  form?: MaterialForm;
+  netQuantity?: number;
+  scrapFactor?: number;
+  stockSize?: string | null;
+  notes?: string | null;
+}
+
+export const addPartMaterial = (partId: number, input: PartMaterialInput) =>
+  request<PartMaterial[]>(`/parts/${partId}/materials`, { method: 'POST', json: input });
+
+export const updatePartMaterial = (id: number, input: PartMaterialInput) =>
+  request<PartMaterial[]>(`/part-materials/${id}`, { method: 'PATCH', json: input });
+
+export const deletePartMaterial = (id: number) =>
+  request<void>(`/part-materials/${id}`, { method: 'DELETE' });
+
+export const getMaterialRequirements = (revisionId: number, quantity?: number) =>
+  request<MaterialRequirements>(
+    `/revisions/${revisionId}/material-requirements${quantity ? `?quantity=${quantity}` : ''}`
+  );
+
+export const materialRequirementsCsvUrl = (revisionId: number, quantity?: number) =>
+  `/api/revisions/${revisionId}/material-requirements/export.csv${quantity ? `?quantity=${quantity}` : ''}`;

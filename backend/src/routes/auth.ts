@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import { Response, Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { Role, User } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { HttpError, asyncHandler } from '../lib/errors';
@@ -7,6 +8,43 @@ import { clearAuthCookie, requireAuth, setAuthCookie } from '../middleware/auth'
 
 const router = Router();
 const PUBLIC_URL = process.env.PUBLIC_URL || 'http://localhost:3010';
+
+// ---------------------------------------------------------------------------
+// OAuth CSRF protection (rule A1)
+// ---------------------------------------------------------------------------
+
+/** Short-lived, httpOnly: the browser echoes it back only to us. */
+const OAUTH_STATE_COOKIE = 'turboplm_oauth';
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const SECURE_COOKIES = PUBLIC_URL.startsWith('https://');
+
+/**
+ * Issue a one-time `state` and remember it in an httpOnly cookie.
+ *
+ * Without this the callback accepted ANY authorization code presented to it, which is
+ * login-CSRF: an attacker can complete the flow in a victim's browser and land them in the
+ * attacker's session (or bind the attacker's identity to the victim's account). The cookie is
+ * the second half of the pair — an attacker can put a code in the URL but cannot set our
+ * cookie, so the two only agree for a flow this server actually started.
+ */
+function issueOauthState(res: Response): string {
+  const state = randomBytes(32).toString('base64url');
+  res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: SECURE_COOKIES,
+    maxAge: OAUTH_STATE_TTL_MS,
+    path: '/api/auth',
+  });
+  return state;
+}
+
+/** One state, one callback: consumed whether or not it matched. */
+function consumeOauthState(req: { cookies?: Record<string, string> }, res: Response): string | null {
+  const stored = req.cookies?.[OAUTH_STATE_COOKIE] ?? null;
+  res.clearCookie(OAUTH_STATE_COOKIE, { path: '/api/auth' });
+  return stored;
+}
 
 function toUserInfo(u: User) {
   return {
@@ -106,6 +144,7 @@ router.get('/google', (_req, res) => {
     response_type: 'code',
     scope: 'openid email profile',
     prompt: 'select_account',
+    state: issueOauthState(res),
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
@@ -116,6 +155,21 @@ router.get(
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     if (!clientId || !clientSecret) throw new HttpError(400, 'Google sign-in is not configured');
+
+    // Checked before the code is exchanged: a mismatched state means this callback did not
+    // come from a flow we started, and spending the code would be doing the attacker's work.
+    const expectedState = consumeOauthState(req, res);
+    const providedState = req.query.state;
+    if (
+      !expectedState ||
+      typeof providedState !== 'string' ||
+      providedState.length !== expectedState.length ||
+      !timingSafeEqual(Buffer.from(providedState), Buffer.from(expectedState))
+    ) {
+      res.redirect('/login?error=state');
+      return;
+    }
+
     const code = req.query.code;
     if (typeof code !== 'string') {
       res.redirect('/login?error=google');
@@ -152,11 +206,20 @@ router.get(
     const info = (await infoRes.json()) as {
       sub: string;
       email?: string;
+      email_verified?: boolean;
       name?: string;
       picture?: string;
     };
     if (!info.email) {
       res.redirect('/login?error=google');
+      return;
+    }
+    // An unverified address must never link to, or create, an account. The linking below
+    // matches an existing user by email alone, so accepting an unverified one would let
+    // whoever controls that address at the provider take over the matching TurboPLM account.
+    // Google returns email_verified; every OIDC provider asserts it as an id_token claim.
+    if (info.email_verified !== true) {
+      res.redirect('/login?error=unverified');
       return;
     }
     const email = info.email.toLowerCase();

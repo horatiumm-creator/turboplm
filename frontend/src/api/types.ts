@@ -117,6 +117,12 @@ export interface EcnReviewDetail {
 export interface EcnDetail extends EcnSummary {
   description: string | null;
   reason: string | null;
+  /**
+   * Unit-based cut-in (rule U6): free text such as "S/N 0042", not a foreign key — the
+   * serial is routinely named before the unit exists. Mutually exclusive with
+   * `effectivityDate`.
+   */
+  effectiveFromSerial: string | null;
   approvedBy: UserRef | null;
   approvedAt: string | null;
   releasedAt: string | null;
@@ -217,6 +223,12 @@ export interface DocumentSummary {
   createdAt: string;
   versionCount: number;
   latestVersion: DocumentVersionDetail | null;
+  /**
+   * Vault lock (rule D1). Present on the SUMMARY, not just the detail, because rule D3's
+   * vault-wide lock column is rendered from the list endpoint — deriving it per row would
+   * mean one detail call each.
+   */
+  lock: DocumentLock | null;
 }
 
 export interface DocumentLinkDetail {
@@ -224,10 +236,27 @@ export interface DocumentLinkDetail {
   target: { type: 'PART' | 'REVISION' | 'ECN'; id: number; label: string };
 }
 
+/**
+ * A check-out (rules D1–D2). The lock lives on the **document**, not a version: it reserves
+ * the right to produce the next version.
+ */
+export interface DocumentLock {
+  user: UserRef;
+  lockedAt: string;
+  expiresAt: string | null;
+  note: string | null;
+  /** The caller holds it. */
+  isMine: boolean;
+  /** Past expiresAt: anyone may take it. */
+  expired: boolean;
+}
+
 export interface DocumentDetail extends DocumentSummary {
   /** Newest first. */
   versions: DocumentVersionDetail[];
   links: DocumentLinkDetail[];
+  /** null when the document is free; the vault state, so the UI needs no second call. */
+  lock: DocumentLock | null;
 }
 
 /** A document as listed on a part / revision / ECN. */
@@ -418,6 +447,10 @@ export interface OperationMaterialDetail {
   quantity: number;
   uom: string;
   notes: string | null;
+  /** Expected process loss as a fraction: 0.02 = 2 %. */
+  scrapFactor: number;
+  /** Adhesive, solder, thread-lock — legitimately absent from the eBOM. */
+  consumable: boolean;
   part: PartRef;
 }
 
@@ -437,6 +470,172 @@ export interface ProcessPlanDetail {
   name: string;
   description: string | null;
   operations: OperationDetail[];
+}
+
+// ---- CAD assembly → eBOM (rules C1–C3) ----
+
+export interface CadAssemblyNode {
+  name: string;
+  instances: number;
+  match: { part: PartRef; by: 'PART_NUMBER' | 'NAME' } | null;
+  children: CadAssemblyNode[];
+}
+
+export interface CadAssembly {
+  status: 'DONE' | 'SKIPPED' | 'FAILED';
+  /** Why it was skipped or how it failed; null when DONE. */
+  reason: string | null;
+  root: CadAssemblyNode | null;
+  nodeCount: number;
+  maxDepth: number;
+  /** When the snapshot was taken; null when there is no snapshot at all. */
+  extractedAt: string | null;
+  rootName: string | null;
+}
+
+export type CadBomChange = 'ADD' | 'REMOVE' | 'QTY_CHANGE' | 'UNCHANGED' | 'UNMATCHED';
+
+export interface CadBomProposalLine {
+  change: CadBomChange;
+  cadName: string | null;
+  part: PartRef | null;
+  cadQuantity: number | null;
+  bomQuantity: number | null;
+  bomLineId: number | null;
+  matchedBy: 'PART_NUMBER' | 'NAME' | null;
+}
+
+export interface CadBomCounts {
+  add: number;
+  remove: number;
+  qtyChange: number;
+  unchanged: number;
+  unmatched: number;
+}
+
+/** One imported level: the top assembly, plus one per sub-assembly when recursive. */
+export interface CadBomLevel {
+  assemblyName: string;
+  /** The part whose eBOM this level writes; null for the revision's own part. */
+  part: PartRef | null;
+  revision: RevisionRef;
+  lines: CadBomProposalLine[];
+  counts: CadBomCounts;
+}
+
+export interface CadBomProposal {
+  documentVersion: { id: number; version: number; fileName: string };
+  revision: RevisionRef;
+  assemblyName: string;
+  applied: boolean;
+  removedMissing: boolean;
+  recursive: boolean;
+  /** CAD nodes below the imported level — they belong to the child parts' own BOMs. */
+  deeperNodeCount: number;
+  /** The top level, kept at the root so a one-level import reads as it always did. */
+  lines: CadBomProposalLine[];
+  counts: CadBomCounts;
+  levels: CadBomLevel[];
+  /** Sub-assemblies the recursion could not write, with why — never fatal. */
+  skippedAssemblies: { cadName: string; part: PartRef | null; reason: string }[];
+  totals: CadBomCounts;
+}
+
+// ---- cBOM ↔ eBOM reconciliation (rule C2a) ----
+
+export type CbomReconStatus =
+  | 'MATCH'
+  | 'QTY_MISMATCH'
+  | 'MISSING_IN_EBOM'
+  | 'EXTRA_IN_EBOM'
+  | 'UNMATCHED';
+
+export interface CbomReconciliationRow {
+  part: PartRef | null;
+  cadName: string | null;
+  status: CbomReconStatus;
+  cadQuantity: number | null;
+  ebomQuantity: number | null;
+}
+
+export interface CbomReconciliation {
+  revision: RevisionRef;
+  documentVersion: { id: number; version: number; fileName: string };
+  assemblyStatus: 'DONE' | 'SKIPPED' | 'FAILED';
+  assemblyReason: string | null;
+  assemblyName: string | null;
+  extractedAt: string | null;
+  rows: CbomReconciliationRow[];
+  counts: {
+    match: number;
+    qtyMismatch: number;
+    missingInEbom: number;
+    extraInEbom: number;
+    unmatched: number;
+  };
+}
+
+// ---- cBOM version diff (rule C2b) ----
+
+export type CadDiffChange = 'ADDED' | 'REMOVED' | 'QTY_CHANGED' | 'UNCHANGED';
+
+export interface CadStructureDiffRow {
+  /** Occurrence path relative to the assembly root, e.g. `BATTERY-PACK/CELL-18650`. */
+  path: string;
+  name: string;
+  change: CadDiffChange;
+  fromQuantity: number | null;
+  toQuantity: number | null;
+}
+
+export interface CadStructureDiff {
+  from: { id: number; version: number; fileName: string; docNumber: string; rootName: string | null };
+  to: { id: number; version: number; fileName: string; docNumber: string; rootName: string | null };
+  sameDocument: boolean;
+  rootRenamed: boolean;
+  rows: CadStructureDiffRow[];
+  counts: { added: number; removed: number; qtyChanged: number; unchanged: number };
+}
+
+// ---- eBOM ↔ mBOM reconciliation (rule C5) ----
+
+export type ReconStatus =
+  | 'MATCH'
+  | 'QTY_MISMATCH'
+  | 'MISSING_IN_MBOM'
+  | 'EXTRA_IN_MBOM'
+  | 'CONSUMABLE_ONLY';
+
+export interface BomReconciliationRow {
+  part: PartRef;
+  status: ReconStatus;
+  ebomQuantity: number | null;
+  /** Σ quantity — the figure the status compares against the eBOM. */
+  mbomNominalQuantity: number | null;
+  /** Σ quantity × (1 + scrap) — what the floor actually draws. */
+  mbomQuantity: number | null;
+  consumedBy: {
+    operationId: number;
+    seq: number;
+    name: string;
+    quantity: number;
+    scrapFactor: number;
+    consumable: boolean;
+  }[];
+  consumable: boolean;
+}
+
+export interface BomReconciliation {
+  revision: RevisionRef;
+  hasPlan: boolean;
+  rows: BomReconciliationRow[];
+  counts: {
+    match: number;
+    qtyMismatch: number;
+    missingInMbom: number;
+    extraInMbom: number;
+    consumableOnly: number;
+  };
 }
 
 export interface Paged<T> {
@@ -741,6 +940,11 @@ export interface NcrDetail extends NcrSummary {
   description: string;
   quantityAffected: number | null;
   lotOrSerial: string | null;
+  /**
+   * The tracked unit this NCR is against (rule U7). `lotOrSerial` stays populated and
+   * untouched for records that predate a tracked unit — the two are independent.
+   */
+  buildUnit: BuildUnitRef | null;
   partRevision: RevisionRef | null;
   ecn: { id: number; ecnNumber: string; status: EcnStatus } | null;
   closedBy: UserRef | null;
@@ -927,4 +1131,693 @@ export interface MyWork {
   }[];
   openEcrs: EcrSummary[];
   activeEcns: EcnSummary[];
+}
+
+// ---- Electronic signatures (rules S1–S4) ----
+
+export type SignedEntityType = 'ECN' | 'REVISION' | 'DOCUMENT';
+export type SignatureMeaning = 'AUTHORED' | 'REVIEWED' | 'APPROVED' | 'QA_APPROVED';
+export type SignatureStatus = 'VALID' | 'VOIDED';
+/** How the signer re-authenticated: a password, or retyping their address (SSO accounts). */
+export type SignatureAuthMethod = 'PASSWORD' | 'EMAIL_CONFIRM';
+
+export interface SignatureRequirement {
+  id: number;
+  entityType: SignedEntityType;
+  meaning: SignatureMeaning;
+  seq: number;
+  /** Exactly one of role / user identifies who may sign. */
+  role: Role | null;
+  user: UserRef | null;
+  active: boolean;
+}
+
+export interface ElectronicSignature {
+  id: number;
+  meaning: SignatureMeaning;
+  user: UserRef;
+  /** Name and role captured at signing time, so the record stands alone. */
+  signedName: string;
+  signedRole: string;
+  signedAt: string;
+  authMethod: SignatureAuthMethod;
+  status: SignatureStatus;
+  voidedAt: string | null;
+  voidedReason: string | null;
+  comment: string | null;
+}
+
+export interface SignatureManifestEntry {
+  requirement: SignatureRequirement;
+  signature: ElectronicSignature | null;
+  /** Whether the current user may execute this requirement right now. */
+  canSign: boolean;
+}
+
+export interface SignatureManifest {
+  entityType: SignedEntityType;
+  entityId: number;
+  label: string;
+  contentHash: string;
+  entries: SignatureManifestEntry[];
+  complete: boolean;
+  outstanding: SignatureMeaning[];
+  /** Every signature ever executed here, newest first, including voided ones. */
+  history: ElectronicSignature[];
+}
+
+// ---- Supplier portal (rules P1–P4) ----
+
+export interface SupplierUserAccount {
+  id: number;
+  email: string;
+  name: string;
+  active: boolean;
+  /** True once the invitation has been accepted and a password set. */
+  accepted: boolean;
+  invitePending: boolean;
+  inviteExpiresAt: string | null;
+  lastLoginAt: string | null;
+}
+
+/** Only the create/reset responses carry the link; no later read exposes it. */
+export interface SupplierUserWithInvite extends SupplierUserAccount {
+  inviteUrl: string;
+}
+
+export interface RfqInvitation {
+  id: number;
+  supplier: { id: number; code: string; name: string };
+  invitedBy: UserRef;
+  invitedAt: string;
+  respondedAt: string | null;
+  activeAccounts: number;
+}
+
+export interface PortalIdentity {
+  id: number;
+  email: string;
+  name: string;
+  supplier: { id: number; name: string; code: string };
+}
+
+export interface PortalRfqSummary {
+  id: number;
+  rfqNumber: string;
+  title: string;
+  status: RfqStatus;
+  dueDate: string | null;
+  sentAt: string | null;
+  closedAt: string | null;
+  lineCount: number;
+  /** Lines this supplier has quoted — never the total received. */
+  myQuoteCount: number;
+  respondedAt: string | null;
+}
+
+export interface PortalQuote {
+  id: number;
+  unitPrice: number;
+  currency: string;
+  leadTimeDays: number | null;
+  moq: number | null;
+  notes: string | null;
+  extendedPrice: number;
+  createdAt: string;
+}
+
+export interface PortalRfqLine {
+  id: number;
+  part: { partNumber: string; name: string; uom: string };
+  quantity: number;
+  notes: string | null;
+  awarded: boolean;
+  /** A line awarded to a competitor names nobody. */
+  awardedToMe: boolean;
+  myQuote: PortalQuote | null;
+}
+
+export interface PortalRfqDetail {
+  id: number;
+  rfqNumber: string;
+  title: string;
+  description: string | null;
+  status: RfqStatus;
+  dueDate: string | null;
+  sentAt: string | null;
+  closedAt: string | null;
+  open: boolean;
+  lines: PortalRfqLine[];
+}
+
+// ---- Serial / lot tracking and as-built records (rules U1–U7) ----
+//
+// These mirror the DTOs in backend/src/routes/units.ts and traceability.ts field for field.
+// An earlier version of this block was written independently of the routers and diverged on
+// almost every name; the shapes below were taken from the wire, not guessed.
+
+/** A serialized unit is quantity 1 with a unique serial; a lot is quantity N under one code. */
+export type BuildKind = 'SERIAL' | 'LOT';
+export type BuildStatus = 'IN_PROGRESS' | 'COMPLETED' | 'SCRAPPED' | 'SHIPPED';
+export type BuildUnitTransitionAction = 'complete' | 'ship' | 'scrap' | 'reopen';
+
+/** Identity of a build unit as referenced from another record; its part is nested. */
+export interface BuildUnitRef {
+  id: number;
+  kind: BuildKind;
+  identifier: string;
+  status: BuildStatus;
+  quantity: number;
+  part: PartRef;
+}
+
+export interface BuildUnitSummary {
+  id: number;
+  kind: BuildKind;
+  identifier: string;
+  part: PartRef;
+  /** The revision it was built to — the baseline the deviation report compares against. */
+  partRevision: RevisionRef;
+  quantity: number;
+  status: BuildStatus;
+  builtAt: string | null;
+  shippedAt: string | null;
+  createdBy: UserRef;
+  createdAt: string;
+}
+
+/** One consumption event: `quantity` of `child` went into the parent unit. */
+export interface AsBuiltLine {
+  id: number;
+  parentId: number;
+  child: BuildUnitRef;
+  quantity: number;
+  /**
+   * The eBOM line this satisfies; null records an unplanned consumption. `childPart` is the
+   * part that line *planned* — compare it with `child.part` to see a substitution.
+   */
+  bomLine: { id: number; findNumber: number; quantity: number; childPart: PartRef } | null;
+  /** Computed at record time, never supplied: the child's part differs from the BOM line's. */
+  substitution: boolean;
+  recordedBy: UserRef;
+  recordedAt: string;
+}
+
+/** The other end of an as-built line: a parent this unit was consumed by. */
+export interface AsBuiltUsage {
+  id: number;
+  parent: BuildUnitRef;
+  quantity: number;
+}
+
+/** Trimmed NCR shape the unit endpoints return, not the full `NcrSummary`. */
+export interface BuildUnitNcr {
+  id: number;
+  ncrNumber: string;
+  title: string;
+  severity: NcrSeverity;
+  status: NcrStatus;
+  disposition: EcnDisposition | null;
+  createdAt: string;
+}
+
+export interface BuildUnitDetail extends BuildUnitSummary {
+  notes: string | null;
+  updatedAt: string;
+  asBuiltLines: AsBuiltLine[];
+  /** A SERIAL unit has at most one parent; a LOT may be split across several. */
+  consumedBy: AsBuiltUsage[];
+  nonconformances: BuildUnitNcr[];
+}
+
+/**
+ * Backward trace — what went into a unit. The response IS the root node, not a wrapper, and
+ * the root describes no consumption, so its `asBuiltLineId` and `quantity` are null.
+ */
+export interface GenealogyNode {
+  unit: BuildUnitRef;
+  /** The as-built line that consumed this unit into its parent; null on the root. */
+  asBuiltLineId: number | null;
+  quantity: number | null;
+  substitution: boolean;
+  hasOpenNonconformances: boolean;
+  openNonconformanceCount: number;
+  /** Consumed something, but the depth cap or node budget stopped the walk. */
+  truncated: boolean;
+  /** Defensive: writes reject cycles, but a read must not hang if one ever exists. */
+  cycle: boolean;
+  children: GenealogyNode[];
+}
+
+/** One hop on the path from the queried unit up to an ancestor. */
+export interface WhereConsumedStep {
+  unit: BuildUnitRef;
+  quantity: number;
+  asBuiltLineId: number;
+}
+
+/**
+ * Forward trace is returned FLAT, not as a tree: one entry per ancestor, each carrying the
+ * `path` back to the queried unit. A unit reachable by two routes appears once.
+ */
+export interface WhereConsumedEntry {
+  unit: BuildUnitRef;
+  /** Hops from the queried unit; 1 is a direct parent. */
+  depth: number;
+  /** Nothing consumes this unit — the boundary of the recall. */
+  topLevel: boolean;
+  /** At the depth cap: it may itself sit inside something outside this trace. */
+  truncated: boolean;
+  hasOpenNonconformances: boolean;
+  openNonconformanceCount: number;
+  /** Queried unit → … → this unit, nearest hop first; `path.length === depth`. */
+  path: WhereConsumedStep[];
+}
+
+export interface WhereConsumedResult {
+  /** The unit the question was asked about — the suspect lot or serial. */
+  unit: BuildUnitRef;
+  units: WhereConsumedEntry[];
+  /** The subset a human has to act on: these left the building. */
+  shippedUnits: WhereConsumedEntry[];
+  /** The subset nothing else consumes — still recallable in house. */
+  topLevelUnits: WhereConsumedEntry[];
+  truncated: boolean;
+  counts: {
+    total: number;
+    shipped: number;
+    completed: number;
+    inProgress: number;
+    scrapped: number;
+    topLevel: number;
+  };
+}
+
+/** `SUBSTITUTED` is an approved alternate, reported distinctly and not as a defect. */
+export type DeviationStatus =
+  | 'MATCH'
+  | 'QTY_MISMATCH'
+  | 'MISSING'
+  | 'UNPLANNED'
+  | 'SUBSTITUTED';
+
+export interface DeviationConsumed {
+  asBuiltLineId: number;
+  unit: BuildUnitRef;
+  quantity: number;
+}
+
+export interface DeviationRow {
+  /** The part actually consumed; the eBOM part when `MISSING`. */
+  part: PartRef;
+  status: DeviationStatus;
+  bomLine: { id: number; findNumber: number; quantity: number; uom: string } | null;
+  /** eBOM line quantity × the unit's build quantity — what the whole build should draw. */
+  plannedQuantity: number | null;
+  builtQuantity: number | null;
+  consumed: DeviationConsumed[];
+  /** Approved alternates used in place of `part`: the evidence behind SUBSTITUTED. */
+  substitutes: { part: PartRef; quantity: number }[];
+  /**
+   * Set when this part was recorded against a BOM line it is not an approved alternate of:
+   * the part that line planned, so the two defect rows can be read together.
+   */
+  unapprovedSubstitutionFor: PartRef | null;
+}
+
+export interface DeviationReport {
+  unit: BuildUnitRef;
+  /** eBOM quantities are per assembly, so a lot of N is expected to draw N × the line. */
+  buildQuantity: number;
+  hasEbom: boolean;
+  /** Severity first, then partNumber — the same ordering as the eBOM↔mBOM view. */
+  rows: DeviationRow[];
+  counts: {
+    match: number;
+    qtyMismatch: number;
+    missing: number;
+    unplanned: number;
+    substituted: number;
+  };
+}
+
+// ---- vendor catalog import (rules V1–V5) ----
+//
+// Transcribed field for field from the frozen wire contract in backend/src/routes/catalog.ts.
+// Nothing here is flattened or renamed for convenience: a divergence in this block is a
+// runtime crash the compiler cannot see, which is how this file has broken before.
+
+export type CatalogFormat = 'CSV' | 'XLSX' | 'BMECAT_XML';
+export type CatalogImportStatus =
+  | 'DRAFT'
+  | 'VALIDATED'
+  /** Claimed by a commit in flight — the state that stops two commits writing the same rows. */
+  | 'COMMITTING'
+  | 'COMMITTED'
+  | 'FAILED'
+  | 'CANCELLED';
+export type CatalogRowStatus =
+  | 'NEW'
+  | 'UPDATE'
+  | 'DUPLICATE'
+  | 'INVALID'
+  | 'SKIPPED'
+  | 'COMMITTED';
+
+/** The mappable target fields. Exactly these keys, nothing else. */
+export type CatalogTargetField =
+  | 'partNumber'
+  | 'name'
+  | 'description'
+  | 'category'
+  | 'uom'
+  | 'unitCost'
+  | 'manufacturerName'
+  | 'mpn'
+  | 'distributorName'
+  | 'distributorPartNumber';
+
+export interface CatalogMapping {
+  id: number;
+  name: string;
+  vendor: string | null;
+  format: CatalogFormat;
+  /** target field -> source column name. Partial: unmapped targets are absent. */
+  fieldMap: Partial<Record<CatalogTargetField, string>>;
+  /** Literal values for fields the file does not carry, e.g. { category: 'PURCHASED' }. */
+  defaults: Partial<Record<CatalogTargetField, string>> | null;
+  headerSignature: string[];
+  builtIn: boolean;
+  createdBy: UserRef | null;
+  createdAt: string;
+}
+
+export interface CatalogImportCounts {
+  rows: number;
+  new: number;
+  update: number;
+  duplicate: number;
+  invalid: number;
+  skipped: number;
+  committed: number;
+  failed: number;
+}
+
+export interface CatalogImportSummary {
+  id: number;
+  fileName: string;
+  format: CatalogFormat;
+  status: CatalogImportStatus;
+  detectedVendor: string | null;
+  mapping: { id: number; name: string } | null;
+  counts: CatalogImportCounts;
+  error: string | null;
+  createdBy: UserRef;
+  createdAt: string;
+  validatedAt: string | null;
+  committedAt: string | null;
+}
+
+export interface CatalogImportDetail extends CatalogImportSummary {
+  /** Source column names in file order — what the mapping UI offers. */
+  sourceColumns: string[];
+  /** Built-in preset whose headerSignature matched, if any. */
+  suggestedMappingId: number | null;
+  /** First 5 source rows verbatim, so the user can see what they are mapping. */
+  sampleRows: Record<string, string>[];
+}
+
+export interface CatalogMappedRow {
+  partNumber: string | null;
+  name: string | null;
+  description: string | null;
+  category: string | null;
+  uom: string | null;
+  unitCost: number | null;
+  manufacturerName: string | null;
+  mpn: string | null;
+  distributorName: string | null;
+  distributorPartNumber: string | null;
+}
+
+export interface CatalogImportRow {
+  id: number;
+  lineNumber: number;
+  status: CatalogRowStatus;
+  message: string | null;
+  raw: Record<string, string>;
+  /** null until the import has been validated. */
+  mapped: CatalogMappedRow | null;
+  /** Set on commit. */
+  part: { id: number; partNumber: string; name: string } | null;
+  manufacturerPart: { id: number; mpn: string; manufacturer: string } | null;
+}
+
+// ---- design review markup (rules K1–K4) ----
+//
+// Transcribed field for field from the frozen wire contract. A markup anchors to a
+// DocumentVersion, never to a document: a comment about geometry is about *that* geometry.
+
+export type MarkupKind = 'PIN_3D' | 'BOX_2D' | 'POINT_2D' | 'NOTE';
+export type MarkupStatus = 'OPEN' | 'RESOLVED' | 'WONT_FIX';
+export type MarkupTransition = 'resolve' | 'wont-fix' | 'reopen';
+
+export interface MarkupComment {
+  id: number;
+  body: string;
+  createdBy: UserRef;
+  createdAt: string;
+}
+
+export interface MarkupDetail {
+  id: number;
+  documentVersionId: number;
+  kind: MarkupKind;
+  /** Shape depends on kind; see rule K1. Normalized 0-1 for 2D. */
+  geometry: Record<string, unknown>;
+  status: MarkupStatus;
+  createdBy: UserRef;
+  createdAt: string;
+  resolvedBy: UserRef | null;
+  resolvedAt: string | null;
+  ecr: { id: number; ecrNumber: string; status: EcrStatus } | null;
+  comments: MarkupComment[];
+}
+
+// ---- service and as-maintained records (rules G1–G4) ----
+//
+// These extend the serial/lot block above rather than duplicating it: a service record hangs
+// off the existing `BuildUnitRef`, and the as-maintained view reuses `GenealogyNode` verbatim.
+
+export type ServiceKind =
+  | 'REPAIR'
+  | 'UPGRADE'
+  | 'INSPECTION'
+  | 'WARRANTY_CLAIM'
+  | 'DECOMMISSION';
+export type ServiceStatus = 'OPEN' | 'IN_PROGRESS' | 'CLOSED' | 'CANCELLED';
+export type ServiceTransition = 'start' | 'close' | 'cancel' | 'reopen';
+
+/** One swap event: at least one of removed / installed is always set (rule G2). */
+export interface ServicePartSwap {
+  id: number;
+  removedUnit: BuildUnitRef | null;
+  installedUnit: BuildUnitRef | null;
+  position: string | null;
+  reason: string;
+  /**
+   * Whether the removed unit was written off. Explicit on the request, never inferred from
+   * `reason` — inferring it from prose scrapped working hardware on "no fault found".
+   */
+  scrapRemoved: boolean;
+  performedBy: UserRef;
+  performedAt: string;
+}
+
+export interface ServiceRecordSummary {
+  id: number;
+  serviceNumber: string;
+  buildUnit: BuildUnitRef;
+  kind: ServiceKind;
+  status: ServiceStatus;
+  title: string;
+  reportedAt: string;
+  closedAt: string | null;
+  technician: UserRef | null;
+  swapCount: number;
+  createdBy: UserRef;
+  createdAt: string;
+}
+
+export interface ServiceRecordDetail extends ServiceRecordSummary {
+  description: string | null;
+  ncr: { id: number; ncrNumber: string; status: NcrStatus } | null;
+  ecn: { id: number; ecnNumber: string; status: EcnStatus } | null;
+  swaps: ServicePartSwap[];
+}
+
+/** A swap seen from the unit's side: the same event, carrying the record it belongs to. */
+export interface AsMaintainedChange {
+  swapId: number;
+  serviceRecord: { id: number; serviceNumber: string; kind: ServiceKind; title: string };
+  removedUnit: BuildUnitRef | null;
+  installedUnit: BuildUnitRef | null;
+  position: string | null;
+  reason: string;
+  performedBy: UserRef;
+  performedAt: string;
+}
+
+export interface AsMaintained {
+  unit: BuildUnitRef;
+  /** Current genealogy — the SAME GenealogyNode shape /genealogy already returns. */
+  current: GenealogyNode;
+  /** Newest first. */
+  changes: AsMaintainedChange[];
+}
+
+// ---------------------------------------------------------------------------
+// Item-level access control (rules X1-X7)
+// ---------------------------------------------------------------------------
+
+/**
+ * The redacted stand-in the backend substitutes for any reference the caller may not read
+ * (rule X4). Wherever a `PartRef`-like field can be redacted, `partNumber` and `name` arrive
+ * as "Restricted" and `id` as null — render the strings and do not link.
+ */
+export interface RedactedRef {
+  redacted: true;
+  id: null;
+  partNumber: 'Restricted';
+  name: 'Restricted';
+}
+
+export type AclEntityType = 'PART' | 'DOCUMENT' | 'ECN' | 'PROJECT' | 'BUILD_UNIT';
+export type AclPermission = 'READ' | 'WRITE';
+
+/** URL segment for `/:entityType/:id/access`, keyed by type. */
+export const ACL_SEGMENTS: Record<AclEntityType, string> = {
+  PART: 'parts',
+  DOCUMENT: 'documents',
+  ECN: 'ecns',
+  PROJECT: 'projects',
+  BUILD_UNIT: 'build-units',
+};
+
+export interface ItemGrant {
+  id: number;
+  group: { id: number; name: string } | null;
+  user: UserRef | null;
+  permission: AclPermission;
+  grantedBy: UserRef;
+  grantedAt: string;
+}
+
+export interface ItemAccess {
+  entityType: AclEntityType;
+  entityId: number;
+  /** False = no grants at all: the item is open to everyone the role rules allow (rule X1). */
+  restricted: boolean;
+  grants: ItemGrant[];
+  /** WRITE on the item, or global ADMIN. */
+  canManage: boolean;
+}
+
+export interface AccessGroupSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  active: boolean;
+  memberCount: number;
+  /** Total grants this group holds across all five types — the delete guard. */
+  grantCount: number;
+  createdAt: string;
+}
+
+export interface AccessGroupDetail extends AccessGroupSummary {
+  members: { id: number; user: UserRef; addedAt: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Materials (rules N2-N3)
+// ---------------------------------------------------------------------------
+
+export type MaterialClass = 'METAL' | 'POLYMER' | 'COMPOSITE' | 'CERAMIC' | 'ELASTOMER' | 'OTHER';
+export type MaterialForm =
+  | 'SHEET'
+  | 'PLATE'
+  | 'BAR'
+  | 'ROD'
+  | 'TUBE'
+  | 'PROFILE'
+  | 'CASTING'
+  | 'FORGING'
+  | 'POWDER'
+  | 'LIQUID'
+  | 'OTHER';
+
+export interface MaterialSummary {
+  id: number;
+  code: string;
+  name: string;
+  materialClass: MaterialClass;
+  specification: string | null;
+  density: number | null;
+  stockUom: string;
+  unitCost: number | null;
+  active: boolean;
+  /** How many parts declare this material — the guard against deleting one in use. */
+  partCount: number;
+  createdAt: string;
+}
+
+export interface MaterialDetail extends MaterialSummary {
+  notes: string | null;
+  updatedAt: string;
+}
+
+export interface PartMaterial {
+  id: number;
+  material: MaterialSummary;
+  form: MaterialForm;
+  netQuantity: number;
+  scrapFactor: number;
+  /** net x (1 + scrapFactor), rounded — what is actually drawn from stock. */
+  grossQuantity: number;
+  stockSize: string | null;
+  notes: string | null;
+}
+
+export interface RequirementContributor {
+  part: PartRef | RedactedRef;
+  perAssembly: number;
+  totalParts: number;
+  netQuantity: number;
+  grossQuantity: number;
+}
+
+export interface MaterialRequirement {
+  material: MaterialSummary;
+  netQuantity: number;
+  grossQuantity: number;
+  stockUom: string;
+  estimatedCost: number | null;
+  fromParts: RequirementContributor[];
+}
+
+export interface UnspecifiedPart {
+  part: PartRef | RedactedRef;
+  perAssembly: number;
+  totalParts: number;
+}
+
+export interface MaterialRequirements {
+  revision: { id: number; revision: string; lifecycle: Lifecycle };
+  part: PartRef;
+  buildQuantity: number;
+  materials: MaterialRequirement[];
+  /** Parts that plausibly need a material and declare none — the planning gaps. */
+  unspecified: UnspecifiedPart[];
+  notes: string[];
+  totalEstimatedCost: number | null;
 }

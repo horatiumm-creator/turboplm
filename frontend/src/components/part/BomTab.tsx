@@ -24,6 +24,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  PartitionOutlined,
   PlusOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -38,6 +39,7 @@ import type {
   RevisionDetail,
 } from '../../api/types';
 import { CategoryTag, LifecycleTag } from '../meta';
+import CadImportModal from './CadImportModal';
 
 interface TreeRow {
   key: string;
@@ -96,6 +98,7 @@ export default function BomTab({
   onChanged: () => void;
 }): JSX.Element {
   const { message, modal } = AntdApp.useApp();
+  const [cadOpen, setCadOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [treeRows, setTreeRows] = useState<TreeRow[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<readonly Key[]>([]);
@@ -532,6 +535,11 @@ export default function BomTab({
             Export CSV
           </Button>
           {editable && (
+            <Button icon={<PartitionOutlined />} onClick={() => setCadOpen(true)}>
+              Import from CAD
+            </Button>
+          )}
+          {editable && (
             <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
               Add component
             </Button>
@@ -718,6 +726,16 @@ export default function BomTab({
           </>
         )}
       </Modal>
+
+      <CadImportModal
+        revision={revision}
+        open={cadOpen}
+        onClose={() => setCadOpen(false)}
+        onApplied={() => {
+          void load();
+          onChanged();
+        }}
+      />
     </div>
   );
 }

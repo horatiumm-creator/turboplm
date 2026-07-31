@@ -3,8 +3,14 @@ import { AmlStatus, Lifecycle, PartCategory, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter, assertCanWrite, REDACTED, visibleIds } from '../lib/acl';
 
 const router = Router();
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
 router.use(requireAuth);
 
 // ---------------------------------------------------------------------------
@@ -259,8 +265,12 @@ const ITEM_CSV_HEADER = [
   'Manufacturer',
 ];
 
-async function loadItemMaster(): Promise<ErpItemDto[]> {
+async function loadItemMaster(user: AclUser): Promise<ErpItemDto[]> {
+  // An export is a list: restricted parts are omitted outright (rule X2). The integration
+  // identity is the API key creator's — see lib/acl.ts note 13: an admin's key exports as an
+  // ENGINEER and does not carry the admin bypass.
   const parts = await prisma.part.findMany({
+    where: { ...(aclFilter('PART', user) as Prisma.PartWhereInput) },
     orderBy: { partNumber: 'asc' },
     include: {
       revisions: {
@@ -295,8 +305,8 @@ async function loadItemMaster(): Promise<ErpItemDto[]> {
 
 router.get(
   '/erp/items.csv',
-  asyncHandler(async (_req, res) => {
-    const items = await loadItemMaster();
+  asyncHandler(async (req, res) => {
+    const items = await loadItemMaster(aclUser(req));
     const rows = [csvRow(ITEM_CSV_HEADER)];
     for (const item of items) {
       rows.push(
@@ -319,8 +329,8 @@ router.get(
 
 router.get(
   '/erp/items.json',
-  asyncHandler(async (_req, res) => {
-    const items = await loadItemMaster();
+  asyncHandler(async (req, res) => {
+    const items = await loadItemMaster(aclUser(req));
     res.setHeader('Content-Disposition', 'attachment; filename="erp_items.json"');
     res.json(items);
   })
@@ -339,12 +349,15 @@ const BOM_CSV_HEADER = [
   'Ref Designators',
 ];
 
-async function loadErpBom(revisionId: number): Promise<{
+async function loadErpBom(
+  revisionId: number,
+  user: AclUser
+): Promise<{
   fileToken: string;
   rows: ErpBomRowDto[];
 }> {
-  const revision = await prisma.partRevision.findUnique({
-    where: { id: revisionId },
+  const revision = await prisma.partRevision.findFirst({
+    where: { id: revisionId, part: aclFilter('PART', user) as Prisma.PartWhereInput },
     select: { id: true, revision: true, part: { select: { partNumber: true } } },
   });
   if (!revision) throw new HttpError(404, 'Revision not found');
@@ -352,15 +365,20 @@ async function loadErpBom(revisionId: number): Promise<{
   const lines = await prisma.bomLine.findMany({
     where: { parentRevisionId: revision.id },
     orderBy: { findNumber: 'asc' },
-    include: { childPart: { select: { partNumber: true } } },
+    include: { childPart: { select: { id: true, partNumber: true } } },
   });
+  // Rule X4 — the row stays (find number, quantity: the ERP needs the structure to add up),
+  // the hidden child's number does not.
+  const visible = await visibleIds('PART', lines.map((line) => line.childPart.id), user);
 
   return {
     fileToken: `${safeFileToken(revision.part.partNumber)}_rev${safeFileToken(revision.revision)}`,
     rows: lines.map((line) => ({
       parentPartNumber: revision.part.partNumber,
       findNumber: line.findNumber,
-      childPartNumber: line.childPart.partNumber,
+      childPartNumber: visible.has(line.childPart.id)
+        ? line.childPart.partNumber
+        : REDACTED.partNumber,
       quantity: line.quantity,
       uom: line.uom,
       refDesignators: line.refDesignators ?? '',
@@ -372,7 +390,7 @@ router.get(
   '/erp/bom/:revisionId.csv',
   asyncHandler(async (req, res) => {
     const revisionId = idParam(req.params.revisionId, 'revisionId');
-    const { fileToken, rows } = await loadErpBom(revisionId);
+    const { fileToken, rows } = await loadErpBom(revisionId, aclUser(req));
     const csv = [csvRow(BOM_CSV_HEADER)];
     for (const row of rows) {
       csv.push(
@@ -394,7 +412,7 @@ router.get(
   '/erp/bom/:revisionId.json',
   asyncHandler(async (req, res) => {
     const revisionId = idParam(req.params.revisionId, 'revisionId');
-    const { fileToken, rows } = await loadErpBom(revisionId);
+    const { fileToken, rows } = await loadErpBom(revisionId, aclUser(req));
     res.setHeader('Content-Disposition', `attachment; filename="${fileToken}_erp_bom.json"`);
     res.json(rows);
   })
@@ -464,7 +482,8 @@ async function runPartsImport(
   db: Prisma.TransactionClient,
   table: CsvTable,
   userId: number,
-  apply: boolean
+  apply: boolean,
+  user: AclUser
 ): Promise<ImportResultDto> {
   const issues: ImportIssueDto[] = [];
   const specs: PartRowSpec[] = [];
@@ -478,6 +497,18 @@ async function runPartsImport(
     where: { partNumber: { in: [...new Set(specs.map((spec) => spec.partNumber))] } },
     select: { id: true, partNumber: true },
   });
+  // Matching is deliberately UNFILTERED: part numbers are unique, so a hidden part's number
+  // would collide on create anyway — that oracle exists regardless. What the filter must stop
+  // is the write: a matched part the caller may not WRITE is refused row by row (rule X2).
+  const writableIds = new Set<number>();
+  for (const part of existing) {
+    try {
+      await assertCanWrite('PART', part.id, user);
+      writableIds.add(part.id);
+    } catch {
+      // Fail-closed: unreadable and read-only both land here.
+    }
+  }
   // Also tracks parts created earlier in this same import, so a part number
   // repeated in the CSV updates the first occurrence instead of colliding.
   const partIdByNumber = new Map<string, number | null>(
@@ -490,6 +521,13 @@ async function runPartsImport(
     const known = partIdByNumber.has(spec.partNumber);
     if (known) {
       const partId = partIdByNumber.get(spec.partNumber) ?? null;
+      if (partId !== null && !writableIds.has(partId)) {
+        issues.push({
+          row: spec.row,
+          message: `You do not have access to update ${spec.partNumber}`,
+        });
+        continue;
+      }
       if (apply && partId !== null) {
         await db.part.update({
           where: { id: partId },
@@ -547,9 +585,9 @@ router.post(
     const table = readCsvTable(csv, ['partNumber', 'name']);
 
     const result = dryRun
-      ? await runPartsImport(prisma, table, userId, false)
+      ? await runPartsImport(prisma, table, userId, false, aclUser(req))
       : await prisma.$transaction(
-          (tx) => runPartsImport(tx, table, userId, true),
+          (tx) => runPartsImport(tx, table, userId, true, aclUser(req)),
           IMPORT_TX_OPTIONS
         );
     res.json(result);
@@ -769,11 +807,13 @@ router.post(
   '/erp/import/bom/:revisionId',
   asyncHandler(async (req, res) => {
     const revisionId = idParam(req.params.revisionId, 'revisionId');
-    const revision = await prisma.partRevision.findUnique({
-      where: { id: revisionId },
+    const user = aclUser(req);
+    const revision = await prisma.partRevision.findFirst({
+      where: { id: revisionId, part: aclFilter('PART', user) as Prisma.PartWhereInput },
       select: { id: true, partId: true, revision: true, lifecycle: true },
     });
     if (!revision) throw new HttpError(404, 'Revision not found');
+    await assertCanWrite('PART', revision.partId, user);
     // Rule 1 — edit gate.
     if (revision.lifecycle !== Lifecycle.IN_WORK) {
       throw new HttpError(

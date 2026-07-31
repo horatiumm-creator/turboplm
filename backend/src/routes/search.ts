@@ -1,9 +1,10 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import { PartCategory } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { asyncHandler } from '../lib/errors';
+import { asyncHandler, HttpError } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { escapeLike } from '../lib/plm';
+import { AclUser, aclFilter } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -44,9 +45,25 @@ const CATEGORY_LABELS: Record<PartCategory, string> = {
 
 const MAX_HITS_PER_GROUP = 5;
 
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
 // ---------------------------------------------------------------------------
 // GET /search — global search across parts, documents, ECNs, ECRs and
 // manufacturers (max 5 hits per group, insensitive contains)
+//
+// Rule X5: search is the leak everything else guards against. A restricted item
+// that surfaces here is fully identified (number *and* name) to someone who was
+// never allowed to know it exists, and it takes two keystrokes to find. Every
+// group below is therefore either filtered or explicitly justified as carrying
+// no protected type — there is no third case.
+//
+// The filter goes in the `where`, never after the query: `take` runs in the
+// database, so post-filtering a page of 5 would silently return fewer hits than
+// the caller is entitled to and would turn "no results" into a probe for
+// restricted numbers.
 // ---------------------------------------------------------------------------
 
 router.get(
@@ -68,32 +85,44 @@ router.get(
     }
 
     const contains = { contains: escapeLike(q), mode: 'insensitive' as const };
+    const user = aclUser(req);
 
     const [parts, documents, ecns, ecrs, manufacturers, requirements] = await Promise.all([
       prisma.part.findMany({
-        where: { OR: [{ partNumber: contains }, { name: contains }] },
+        // The `OR` here is exactly the collision aclFilter's `AND` wrapper exists
+        // for: spread by key, a bare top-level `OR` from the filter would
+        // overwrite the search term (or be overwritten by it) depending on
+        // nothing but spread order.
+        where: { OR: [{ partNumber: contains }, { name: contains }], ...aclFilter('PART', user) },
         orderBy: { partNumber: 'asc' },
         take: MAX_HITS_PER_GROUP,
         select: { id: true, partNumber: true, name: true, category: true },
       }),
       prisma.document.findMany({
-        where: { OR: [{ docNumber: contains }, { title: contains }] },
+        where: { OR: [{ docNumber: contains }, { title: contains }], ...aclFilter('DOCUMENT', user) },
         orderBy: { id: 'desc' },
         take: MAX_HITS_PER_GROUP,
         select: { id: true, docNumber: true, title: true },
       }),
       prisma.ecn.findMany({
-        where: { OR: [{ ecnNumber: contains }, { title: contains }] },
+        where: { OR: [{ ecnNumber: contains }, { title: contains }], ...aclFilter('ECN', user) },
         orderBy: { id: 'desc' },
         take: MAX_HITS_PER_GROUP,
         select: { id: true, ecnNumber: true, title: true, status: true },
       }),
+      // ECRs are not an ACL-bearing type and this hit carries only the ECR's own
+      // number and title — no part or ECN is joined in, so there is nothing here
+      // to filter. (The ECR *detail* route, which does expose its part, is not
+      // this file's.)
       prisma.ecr.findMany({
         where: { OR: [{ ecrNumber: contains }, { title: contains }] },
         orderBy: { id: 'desc' },
         take: MAX_HITS_PER_GROUP,
         select: { id: true, ecrNumber: true, title: true },
       }),
+      // Manufacturers and requirements are not ACL-bearing and neither hit joins a
+      // protected type: the labels are the manufacturer's own name and the
+      // requirement's own number/title/status.
       prisma.manufacturer.findMany({
         where: { name: contains },
         orderBy: { name: 'asc' },
@@ -109,11 +138,18 @@ router.get(
     ]);
 
     // "linked parts" = distinct parts, not AML rows (a part may carry several
-    // MPNs from the same manufacturer).
+    // MPNs from the same manufacturer). The count is over parts, so it is an
+    // aggregate over a protected type and needs the filter: without it a
+    // manufacturer's sublabel moves from "2 linked parts" to "3 linked parts" the
+    // moment a restricted part is sourced from them, which is exactly the
+    // existence signal the feature denies elsewhere.
     const distinctLinks =
       manufacturers.length > 0
         ? await prisma.manufacturerPart.findMany({
-            where: { manufacturerId: { in: manufacturers.map((m) => m.id) } },
+            where: {
+              manufacturerId: { in: manufacturers.map((m) => m.id) },
+              part: { ...aclFilter('PART', user) },
+            },
             distinct: ['manufacturerId', 'partId'],
             select: { manufacturerId: true },
           })

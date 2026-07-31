@@ -3,6 +3,7 @@ import { Lifecycle, PartCategory, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
+import { AclUser, aclFilter, assertCanWrite, REDACTED, visibleIds } from '../lib/acl';
 import { resolveDisplayRevision } from '../lib/plm';
 
 /**
@@ -59,7 +60,7 @@ interface OptionGroupDetailDto {
 interface VariantBomLineDto {
   lineId: number;
   findNumber: number;
-  part: PartRefDto;
+  part: PartRefDto | typeof REDACTED;
   revision: RevisionRefDto | null;
   quantity: number;
   uom: string;
@@ -224,6 +225,16 @@ function assertEditable(rev: { revision: string; lifecycle: Lifecycle }): void {
   }
 }
 
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
+}
+
+function partAcl(user: AclUser): Prisma.PartWhereInput {
+  return aclFilter('PART', user) as Prisma.PartWhereInput;
+}
+
 // ---------------------------------------------------------------------------
 // GET /parts/:id/option-groups
 // ---------------------------------------------------------------------------
@@ -232,7 +243,11 @@ router.get(
   '/parts/:id/option-groups',
   asyncHandler(async (req, res) => {
     const partId = idParam(req.params.id);
-    const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+    // A restricted part 404s like a missing one (rule X2).
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...partAcl(aclUser(req)) },
+      select: { id: true },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
 
     const groups = await fetchGroups(partId);
@@ -248,8 +263,14 @@ router.post(
   '/parts/:id/option-groups',
   asyncHandler(async (req, res) => {
     const partId = idParam(req.params.id);
-    const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+    const user = aclUser(req);
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...partAcl(user) },
+      select: { id: true },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
+    // The 150% option model is the part's product definition — a write to the part.
+    await assertCanWrite('PART', partId, user);
 
     const body = requireBody(req);
     const code = parseCode(body);
@@ -294,11 +315,13 @@ router.delete(
   '/option-groups/:id',
   asyncHandler(async (req, res) => {
     const groupId = idParam(req.params.id);
-    const group = await prisma.optionGroup.findUnique({
-      where: { id: groupId },
-      select: { id: true },
+    const user = aclUser(req);
+    const group = await prisma.optionGroup.findFirst({
+      where: { id: groupId, part: partAcl(user) },
+      select: { id: true, partId: true },
     });
     if (!group) throw new HttpError(404, 'Option group not found');
+    await assertCanWrite('PART', group.partId, user);
 
     await prisma.optionGroup.delete({ where: { id: group.id } });
     res.status(204).end();
@@ -313,11 +336,13 @@ router.post(
   '/option-groups/:id/values',
   asyncHandler(async (req, res) => {
     const groupId = idParam(req.params.id);
-    const group = await prisma.optionGroup.findUnique({
-      where: { id: groupId },
-      select: { id: true },
+    const user = aclUser(req);
+    const group = await prisma.optionGroup.findFirst({
+      where: { id: groupId, part: partAcl(user) },
+      select: { id: true, partId: true },
     });
     if (!group) throw new HttpError(404, 'Option group not found');
+    await assertCanWrite('PART', group.partId, user);
 
     const body = requireBody(req);
     const code = parseCode(body);
@@ -358,11 +383,13 @@ router.delete(
   '/option-values/:id',
   asyncHandler(async (req, res) => {
     const valueId = idParam(req.params.id);
-    const value = await prisma.optionValue.findUnique({
-      where: { id: valueId },
-      select: { id: true },
+    const user = aclUser(req);
+    const value = await prisma.optionValue.findFirst({
+      where: { id: valueId, group: { part: partAcl(user) } },
+      select: { id: true, group: { select: { partId: true } } },
     });
     if (!value) throw new HttpError(404, 'Option value not found');
+    await assertCanWrite('PART', value.group.partId, user);
 
     await prisma.optionValue.delete({ where: { id: value.id } });
     res.status(204).end();
@@ -377,14 +404,16 @@ router.put(
   '/bom-lines/:id/options',
   asyncHandler(async (req, res) => {
     const lineId = idParam(req.params.id);
-    const line = await prisma.bomLine.findUnique({
-      where: { id: lineId },
+    const user = aclUser(req);
+    const line = await prisma.bomLine.findFirst({
+      where: { id: lineId, parentRevision: { part: partAcl(user) } },
       select: {
         id: true,
         parentRevision: { select: { partId: true, revision: true, lifecycle: true } },
       },
     });
     if (!line) throw new HttpError(404, 'BOM line not found');
+    await assertCanWrite('PART', line.parentRevision.partId, user);
     assertEditable(line.parentRevision);
 
     const body = requireBody(req);
@@ -437,8 +466,9 @@ router.post(
   '/revisions/:id/resolve-variant',
   asyncHandler(async (req, res) => {
     const revisionId = idParam(req.params.id);
-    const revision = await prisma.partRevision.findUnique({
-      where: { id: revisionId },
+    const user = aclUser(req);
+    const revision = await prisma.partRevision.findFirst({
+      where: { id: revisionId, part: partAcl(user) },
       include: { part: true },
     });
     if (!revision) throw new HttpError(404, 'Revision not found');
@@ -525,16 +555,21 @@ router.post(
       },
     });
 
+    // Rule X4 — a hidden child keeps its line (the variant maths must add up) and loses its
+    // identity and revision.
+    const visible = await visibleIds('PART', lines.map((line) => line.childPart.id), user);
+
     const included: VariantBomLineDto[] = [];
     const excluded: VariantBomLineDto[] = [];
     let unconditionalCount = 0;
 
     for (const line of lines) {
-      const resolved = resolveDisplayRevision(line.childPart.revisions);
+      const hidden = !visible.has(line.childPart.id);
+      const resolved = hidden ? null : resolveDisplayRevision(line.childPart.revisions);
       const dto: VariantBomLineDto = {
         lineId: line.id,
         findNumber: line.findNumber,
-        part: toPartRef(line.childPart),
+        part: hidden ? { ...REDACTED } : toPartRef(line.childPart),
         revision: resolved ? toRevisionRef(resolved) : null,
         quantity: line.quantity,
         uom: line.uom,

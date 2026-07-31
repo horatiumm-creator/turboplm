@@ -9,7 +9,8 @@ import {
 import { prisma } from '../lib/prisma';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
-import { escapeLike } from '../lib/plm';
+import { escapeLike, withNumberLock } from '../lib/plm';
+import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
 
 const router = Router();
 router.use(requireAuth);
@@ -48,8 +49,11 @@ interface RequirementSummaryDto {
 
 interface RequirementLinkDto {
   id: number;
-  part: PartRefDto | null;
-  document: { id: number; docNumber: string; title: string } | null;
+  part: PartRefDto | typeof REDACTED | null;
+  document:
+    | { id: number; docNumber: string; title: string }
+    | (typeof REDACTED & { docNumber: string; title: string })
+    | null;
 }
 
 interface RequirementDetailDto extends RequirementSummaryDto {
@@ -157,17 +161,30 @@ function toRequirementSummary(row: RequirementSummarySource): RequirementSummary
   };
 }
 
-function toRequirementLink(link: RequirementLinkRow): RequirementLinkDto {
+/** Rule X4 — a link target the caller may not read keeps its row and loses its identity. */
+function toRequirementLink(
+  link: RequirementLinkRow,
+  vis: { parts: ReadonlySet<number>; documents: ReadonlySet<number> }
+): RequirementLinkDto {
   return {
     id: link.id,
-    part: link.part ? toPartRef(link.part) : null,
+    part: link.part
+      ? vis.parts.has(link.part.id)
+        ? toPartRef(link.part)
+        : { ...REDACTED }
+      : null,
     document: link.document
-      ? { id: link.document.id, docNumber: link.document.docNumber, title: link.document.title }
+      ? vis.documents.has(link.document.id)
+        ? { id: link.document.id, docNumber: link.document.docNumber, title: link.document.title }
+        : { ...REDACTED, docNumber: REDACTED.name, title: REDACTED.name }
       : null,
   };
 }
 
-function toRequirementDetail(row: RequirementDetailRow): RequirementDetailDto {
+function toRequirementDetail(
+  row: RequirementDetailRow,
+  vis: { parts: ReadonlySet<number>; documents: ReadonlySet<number> }
+): RequirementDetailDto {
   return {
     ...toRequirementSummary(row),
     statement: row.statement,
@@ -177,17 +194,34 @@ function toRequirementDetail(row: RequirementDetailRow): RequirementDetailDto {
       ? { id: row.parent.id, reqNumber: row.parent.reqNumber, title: row.parent.title }
       : null,
     children: row.children.map(toRequirementSummary),
-    links: row.links.map(toRequirementLink),
+    links: row.links.map((link) => toRequirementLink(link, vis)),
   };
 }
 
-async function getRequirementDetailOrThrow(id: number): Promise<RequirementDetailDto> {
+async function getRequirementDetailOrThrow(id: number, user: AclUser): Promise<RequirementDetailDto> {
   const requirement = await prisma.requirement.findUnique({
     where: { id },
     include: requirementDetailInclude,
   });
   if (!requirement) throw new HttpError(404, 'Requirement not found');
-  return toRequirementDetail(requirement);
+  const [parts, documents] = await Promise.all([
+    visibleIds(
+      'PART',
+      requirement.links.flatMap((link) => (link.part ? [link.part.id] : [])),
+      user
+    ),
+    visibleIds(
+      'DOCUMENT',
+      requirement.links.flatMap((link) => (link.document ? [link.document.id] : [])),
+      user
+    ),
+  ]);
+  return toRequirementDetail(requirement, { parts, documents });
+}
+
+function aclUser(req: Request): AclUser {
+  if (!req.user) throw new HttpError(401, 'Not authenticated');
+  return { id: req.user.id, role: req.user.role };
 }
 
 // ---------------------------------------------------------------------------
@@ -299,8 +333,8 @@ async function assertValidParent(
 }
 
 /** Rule R1 — scan-based numbering, REQ-10001 style. */
-async function generateReqNumber(): Promise<string> {
-  const rows = await prisma.$queryRaw<{ max: number | null }[]>`
+async function generateReqNumber(db: Prisma.TransactionClient = prisma): Promise<string> {
+  const rows = await db.$queryRaw<{ max: number | null }[]>`
     SELECT MAX(SUBSTRING("reqNumber" FROM 5)::int) AS max
     FROM "Requirement"
     WHERE "reqNumber" ~ '^REQ-[0-9]{1,9}$'`;
@@ -392,8 +426,8 @@ router.post(
     const parentId = body.parentId === undefined ? null : parseParentId(body.parentId);
     if (parentId !== null) await assertValidParent(prisma, parentId, null);
 
-    const createRequirementRecord = (reqNumber: string) =>
-      prisma.requirement.create({
+    const createRequirementRecord = (reqNumber: string, db: Prisma.TransactionClient = prisma) =>
+      db.requirement.create({
         data: {
           reqNumber,
           title,
@@ -409,18 +443,19 @@ router.post(
       });
 
     // Numbers can only collide under concurrent creates — regenerate and retry.
-    const created = await (async () => {
+    const created = await withNumberLock(async (tx) => {
+      // Serialized allocation; the retry is a backstop for a manually-typed clash.
       for (let attempt = 0; ; attempt++) {
         try {
-          return await createRequirementRecord(await generateReqNumber());
+          return await createRequirementRecord(await generateReqNumber(tx), tx);
         } catch (err) {
           if ((err as { code?: string } | null)?.code === 'P2002' && attempt < 3) continue;
           throw err;
         }
       }
-    })();
+    });
 
-    res.status(201).json(await getRequirementDetailOrThrow(created.id));
+    res.status(201).json(await getRequirementDetailOrThrow(created.id, aclUser(req)));
   })
 );
 
@@ -470,7 +505,7 @@ router.get(
 router.get(
   '/requirements/:id',
   asyncHandler(async (req, res) => {
-    res.json(await getRequirementDetailOrThrow(idParam(req.params.id)));
+    res.json(await getRequirementDetailOrThrow(idParam(req.params.id), aclUser(req)));
   })
 );
 
@@ -519,7 +554,7 @@ router.patch(
     } else {
       await prisma.requirement.update({ where: { id }, data });
     }
-    res.json(await getRequirementDetailOrThrow(id));
+    res.json(await getRequirementDetailOrThrow(id, aclUser(req)));
   })
 );
 
@@ -575,7 +610,7 @@ router.post(
       );
     }
 
-    res.json(await getRequirementDetailOrThrow(id));
+    res.json(await getRequirementDetailOrThrow(id, aclUser(req)));
   })
 );
 
@@ -642,7 +677,11 @@ router.post(
       if (!Number.isInteger(partId) || partId <= 0 || partId > 2147483647) {
         throw new HttpError(400, 'partId must be a positive integer');
       }
-      const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+      // A restricted part answers like a missing one (rule X2).
+      const part = await prisma.part.findFirst({
+        where: { id: partId, ...(aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput) },
+        select: { id: true },
+      });
       if (!part) throw new HttpError(404, 'Part not found');
       const duplicate = await prisma.requirementLink.findFirst({
         where: { requirementId: id, partId },
@@ -655,8 +694,11 @@ router.post(
       if (!Number.isInteger(documentId) || documentId <= 0 || documentId > 2147483647) {
         throw new HttpError(400, 'documentId must be a positive integer');
       }
-      const document = await prisma.document.findUnique({
-        where: { id: documentId },
+      const document = await prisma.document.findFirst({
+        where: {
+          id: documentId,
+          ...(aclFilter('DOCUMENT', aclUser(req)) as Prisma.DocumentWhereInput),
+        },
         select: { id: true },
       });
       if (!document) throw new HttpError(404, 'Document not found');
@@ -668,7 +710,7 @@ router.post(
       await prisma.requirementLink.create({ data: { requirementId: id, documentId } });
     }
 
-    res.status(201).json(await getRequirementDetailOrThrow(id));
+    res.status(201).json(await getRequirementDetailOrThrow(id, aclUser(req)));
   })
 );
 
@@ -695,7 +737,10 @@ router.get(
   '/parts/:id/requirements',
   asyncHandler(async (req, res) => {
     const partId = idParam(req.params.id);
-    const part = await prisma.part.findUnique({ where: { id: partId }, select: { id: true } });
+    const part = await prisma.part.findFirst({
+      where: { id: partId, ...(aclFilter('PART', aclUser(req)) as Prisma.PartWhereInput) },
+      select: { id: true },
+    });
     if (!part) throw new HttpError(404, 'Part not found');
 
     const requirements = await prisma.requirement.findMany({
