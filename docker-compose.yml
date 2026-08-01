@@ -2,6 +2,7 @@ name: turboplm
 
 services:
   db:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: turboplm
@@ -18,6 +19,7 @@ services:
       retries: 20
 
   api:
+    restart: unless-stopped
     build: ./backend
     environment:
       DATABASE_URL: postgresql://turboplm:turboplm@db:5432/turboplm
@@ -50,6 +52,7 @@ services:
         condition: service_healthy
 
   cad:
+    restart: unless-stopped
     build: ./cad
     environment:
       UPLOAD_DIR: /app/uploads
@@ -79,6 +82,7 @@ services:
         - VITE_DEMO_EMAIL=demo@turboplm.com
         - VITE_DEMO_PASSWORD=explore-turboplm
     container_name: turboplm-web
+    restart: unless-stopped
     ports:
       - "127.0.0.1:3010:80"   # local access only; the internet arrives via the edge proxy
     depends_on:
