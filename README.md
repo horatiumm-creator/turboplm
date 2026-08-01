@@ -1,6 +1,6 @@
 # TurboPLM
 
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Node 20](https://img.shields.io/badge/Node-20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![React 18](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
 [![Postgres 16](https://img.shields.io/badge/Postgres-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
@@ -461,15 +461,15 @@ Issues and pull requests are welcome. Two conventions keep the codebase coherent
 
 ## License
 
-[FSL-1.1-MIT](LICENSE) — the [Functional Source License](https://fsl.software), which
-grants broad rights for any **Permitted Purpose** (internal use, non-commercial education
-and research, and professional services around it) while excluding **Competing Use** —
-repackaging TurboPLM as a commercial product or service that substitutes for it.
+[GNU AGPL v3](LICENSE) — free and open source software, OSI-approved.
 
-Each version converts to the plain **MIT license two years after its release**, so
-everything published here becomes fully permissive on a rolling schedule.
+Use it, study it, change it and share it, commercially or otherwise. The single
+obligation is reciprocal, and it is why this was chosen over MIT: if you modify TurboPLM
+and let other people use it **over a network**, you have to offer them your modified
+source too. Running an unmodified copy — for your own company, on your own hardware —
+carries no obligation at all.
 
----
+Relicensed from FSL-1.1-MIT on 1 August 2026. Copyright (C) 2026 Hai-Soft Inc.
 
 ## About
 
