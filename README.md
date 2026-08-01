@@ -1,19 +1,38 @@
 # TurboPLM
 
+**Open source PLM for hardware teams.** The part master, the multi-level bill of
+materials, revisions with a lifecycle the server actually enforces, and engineering
+change control — for the BOMs and drawings currently living in a spreadsheet and a
+shared drive.
+
+### ▶ [Try it now — no signup](https://demo.turboplm.com)
+
+One click into a live instance seeded with a four-level quadcopter: released and
+in-work revisions, a change notice mid-flight, signatures, serialised build units.
+
+![A part in TurboPLM: revision B in work, managed by a change notice, with the
+signatures it needs before release and its access grants](media/screenshots/part-overview.png)
+
+<sub>Below the fold on that same page: the bill of materials, with find numbers,
+quantities and each child resolved to its released revision —
+[screenshot](media/screenshots/part-bom.png).</sub>
+
+**Three ways to run it**
+
+| | |
+|---|---|
+| **Hosted, free** | [saas.turboplm.com](https://saas.turboplm.com) — one person, 100 parts, no card. Unlimited team and parts is 10 USD/month for the whole organisation. |
+| **Self-hosted** | Clone this repository, `docker compose up`. Free, unlimited, your hardware, your database. See [Quick Start](#quick-start). |
+| **Just looking** | [demo.turboplm.com](https://demo.turboplm.com) — read-only, real data, nothing to install. |
+
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Node 20](https://img.shields.io/badge/Node-20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![React 18](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
 [![Postgres 16](https://img.shields.io/badge/Postgres-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 
-A self-hosted **Product Lifecycle Management** platform in the spirit of Aras Innovator
-and Siemens Teamcenter — product structure, bills of material, part revisioning,
-manufacturing processes and full engineering change control. Web client only, fully
-dockerized, runs on your laptop with one command.
-
-> **Note:** TurboPLM is a young project under active development. It runs and the
-> features below work, but treat it as pre-1.0: review the Deployment Notes before
-> putting it anywhere that matters.
+> **Pre-1.0.** It runs, and everything below works, but read the Deployment Notes
+> before putting it anywhere that matters.
 
 ---
 
