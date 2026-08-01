@@ -1,8 +1,19 @@
 name: turboplm
 
+# Bounded container logs. Two reasons, and the second is the one people forget:
+# an unbounded json-file log fills the host disk and takes every site on it down,
+# and request logs are personal data whose retention has to be describable in a
+# privacy notice. 10 MB x 5 gives a stated, finite window.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     restart: unless-stopped
+    logging: *default-logging
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: turboplm
@@ -20,6 +31,7 @@ services:
 
   api:
     restart: unless-stopped
+    logging: *default-logging
     build: ./backend
     environment:
       DATABASE_URL: postgresql://turboplm:turboplm@db:5432/turboplm
@@ -53,6 +65,7 @@ services:
 
   cad:
     restart: unless-stopped
+    logging: *default-logging
     build: ./cad
     environment:
       UPLOAD_DIR: /app/uploads
@@ -65,6 +78,7 @@ services:
     build: ./landing
     container_name: turboplm-landing
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - default
       - edge
@@ -83,6 +97,7 @@ services:
         - VITE_DEMO_PASSWORD=explore-turboplm
     container_name: turboplm-web
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "127.0.0.1:3010:80"   # local access only; the internet arrives via the edge proxy
     depends_on:

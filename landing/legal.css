@@ -1,0 +1,102 @@
+/* Shared styling for the pages that are not the marketing page: /terms, /privacy
+   and the 404.
+
+   The tokens, .wrap, .eyebrow, header and footer rules below are copied from the
+   <style> block in index.html rather than imported from it, because index.html
+   keeps its CSS inline — the marketing page is one document that should render
+   from a single request, and unpicking that to share four rules would slow the
+   page that has to load fastest. The copy is small and these pages change rarely;
+   if a token changes in index.html, change it here too. */
+
+:root{
+  --bg:#ffffff; --bg-alt:#f6f8fb; --bg-deep:#0b1524;
+  --text:#111a28; --muted:#5b6a80; --line:#e3e8ef;
+  --accent:#1e6fd9; --accent-soft:#e8f1fd; --accent-deep:#1656ab;
+  --ok:#1f9d55; --warn:#c47f0a;
+  --radius:12px; --max:1120px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0b1220; --bg-alt:#111a2b; --bg-deep:#070d18;
+    --text:#e8edf5; --muted:#93a2b8; --line:#1e2a3d;
+    --accent:#4d94f0; --accent-soft:#12233c; --accent-deep:#75aef5;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+h1,h2,h3{line-height:1.2;margin:0 0 .5em;letter-spacing:-0.02em}
+h2{font-size:clamp(1.4rem,2.8vw,1.9rem);margin-top:0}
+h3{font-size:1.06rem;margin-bottom:.35em}
+p{margin:0 0 1em}
+.lede{color:var(--muted);font-size:1.06rem;max-width:62ch}
+
+header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;justify-content:space-between;height:64px;gap:24px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.12rem;color:var(--text)}
+.brand:hover{text-decoration:none}
+.mark{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
+.nav-links{display:flex;gap:22px;align-items:center;font-size:.94rem}
+.nav-links a{color:var(--muted)}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+@media(max-width:760px){.nav-links{display:none}}
+
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent;cursor:pointer;transition:.15s}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-deep);color:#fff}
+.btn-ghost{border-color:var(--line);color:var(--text);background:var(--bg)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+section{padding:56px 0;border-top:1px solid var(--line)}
+.eyebrow{text-transform:uppercase;letter-spacing:.09em;font-size:.76rem;font-weight:700;color:var(--accent);margin-bottom:10px}
+.hero{padding:64px 0 40px;border-top:none}
+.hero h1{font-size:clamp(1.9rem,4.4vw,2.9rem)}
+
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:var(--bg)}
+/* The accent-edged callout from the marketing page, reused for "the short version"
+   at the top of each legal page — the part a procurement reviewer reads first. */
+.callout{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:22px 24px;background:var(--bg-alt)}
+.callout p:last-child{margin-bottom:0}
+
+/* Legal prose: a measure short enough to read, and headings that are scannable
+   because most people arrive looking for one specific answer. */
+.legal{max-width:74ch}
+.legal h2{margin-top:2em}
+.legal h2:first-child{margin-top:0}
+.legal h3{margin-top:1.6em;color:var(--text)}
+.legal p,.legal li{color:var(--muted)}
+.legal strong{color:var(--text)}
+.legal ul{padding-left:20px;margin:0 0 1em}
+.legal li{margin-bottom:.5em}
+.legal code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:var(--bg-alt);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.meta{color:var(--muted);font-size:.9rem}
+
+/* Wide content must scroll inside itself rather than pushing the page sideways
+   on a phone, which is where a good share of a cold email's clicks land. */
+.tbl-wrap{overflow-x:auto;margin:0 0 1em;border:1px solid var(--line);border-radius:var(--radius)}
+table.tbl{width:100%;border-collapse:collapse;font-size:.9rem;min-width:520px}
+table.tbl th{text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line);padding:10px 14px;font-weight:700;background:var(--bg-alt)}
+table.tbl td{padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted);vertical-align:top}
+table.tbl tr:last-child td{border-bottom:none}
+table.tbl td:first-child{color:var(--text);font-weight:600;white-space:nowrap}
+
+/* A placeholder the owner still has to fill in. Marked in the markup rather than
+   left as ordinary prose so it is impossible to miss on the rendered page and
+   greppable in the source: `grep todo landing/*.html`. */
+.todo{background:rgba(196,127,10,.14);color:var(--warn);border:1px dashed var(--warn);border-radius:5px;padding:1px 6px;font-weight:600;font-size:.9em}
+
+/* The 404 carries too little content to push the footer to the bottom of a desktop
+   window, which leaves a band of blank page below a dark footer bar. */
+body.short{min-height:100vh;display:flex;flex-direction:column}
+body.short footer{margin-top:auto}
+
+footer{background:var(--bg-deep);color:#9fb3cd;padding:52px 0 34px;border-top:1px solid var(--line)}
+footer h4{color:#fff;font-size:.86rem;text-transform:uppercase;letter-spacing:.07em;margin:0 0 12px}
+footer a{color:#c3d3e8;font-size:.92rem;display:block;margin-bottom:8px}
+.foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:40px}
+@media(max-width:760px){.foot-grid{grid-template-columns:1fr;gap:28px}}
+.foot-bot{border-top:1px solid rgba(255,255,255,.1);margin-top:34px;padding-top:20px;font-size:.85rem;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}

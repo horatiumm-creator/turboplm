@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy notice — TurboPLM</title>
+<meta name="description" content="What TurboPLM stores, where it is hosted, who else processes it, and how to ask for a copy or for deletion." />
+<!-- Not indexed on purpose: this page exists to be read by the person evaluating
+     TurboPLM, and a legal notice competing with the product page in search results
+     helps nobody. -->
+<meta name="robots" content="noindex, follow" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/legal.css" />
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="mark">T</span> TurboPLM</a>
+    <nav class="nav-links">
+      <a href="/#capabilities">Capabilities</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/#selfhosted">Self-hosted</a>
+      <a href="/terms">Terms</a>
+      <a href="https://saas.turboplm.com/login">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Privacy</div>
+    <h1>Privacy notice</h1>
+    <p class="meta">Last updated 1 August 2026.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout legal" style="max-width:none">
+      <h3 style="margin-top:0">The short version</h3>
+      <p>
+        This site runs no analytics and sets no cookies at all. The hosted product sets one
+        cookie, to keep you signed in. We store the account details you give us and the
+        engineering data you put in — parts, bills of material, documents, supplier contacts
+        — on our own server, in Postgres. Card details never reach us: Stripe handles
+        payment. We do not sell anything to anyone, and we do not use your product data to
+        train anything.
+      </p>
+      <p>
+        If you run TurboPLM on your own hardware, none of this applies to us, because none
+        of your data reaches us. <strong>You</strong> hold it.
+      </p>
+      <p style="margin-bottom:0">
+        There is no self-service delete button yet. Ask us at
+        <a href="mailto:office@turboplm.com?subject=Data%20request">office@turboplm.com</a>
+        and a person does it by hand.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <!-- .legal nests INSIDE .wrap rather than sharing an element with it: .wrap carries
+       `margin:0 auto`, so a narrower max-width on the same element centres the whole
+       column and leaves the body text out of alignment with the heading above it. -->
+  <div class="wrap"><div class="legal">
+
+    <h2>Who we are</h2>
+    <p>
+      TurboPLM is operated by <strong>Hai-Soft Inc</strong>. Contact us about anything on this
+      page at <a href="mailto:office@turboplm.com?subject=Data%20protection%20enquiry">office@turboplm.com</a>.
+    </p>
+    <p>
+      Registered address: available on request — write to <a href="mailto:office@turboplm.com">office@turboplm.com</a>.
+      Company registration number: available on request.
+    </p>
+    <p>
+      We have not appointed a data protection officer. We are a small company and are not
+      required to have one; questions go to the address above and are answered by a person
+      rather than a function.
+    </p>
+
+    <h2>Which TurboPLM you are using</h2>
+    <p>
+      Four different things carry the TurboPLM name, and they hold your data very
+      differently. This notice tells you which is which.
+    </p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>What</th><th>Where</th><th>Who holds the data</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Marketing site</td>
+            <td>turboplm.com</td>
+            <td>Nothing is collected from you here beyond server logs. There are no forms and no trackers.</td>
+          </tr>
+          <tr>
+            <td>Public demo</td>
+            <td>demo.turboplm.com</td>
+            <td>We do. It is a single shared instance and everything in it is visible to every visitor. Do not put real product data in it.</td>
+          </tr>
+          <tr>
+            <td>Hosted product</td>
+            <td>saas.turboplm.com</td>
+            <td>We do. Your organisation gets its own isolated workspace on our server. This is what most of this notice is about.</td>
+          </tr>
+          <tr>
+            <td>Self-hosted</td>
+            <td>Your own hardware</td>
+            <td>You do. The software sends us nothing — there is no telemetry, no licence check and no call home. We have no access and receive no copy.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The marketing site</h2>
+    <p>
+      This page and the rest of turboplm.com are static files. There is no analytics script,
+      no tag manager, no advertising pixel, no embedded font from anyone else's server and no
+      cookie — which is why you were not asked to accept any. The contact link opens your own
+      email client; nothing is submitted to us through the page.
+    </p>
+    <p>
+      Our web server keeps ordinary access logs: the IP address the request came from, the
+      time, the URL requested, the response code and the browser's user-agent string. They
+      exist to diagnose faults and to see whether the site is up, they are not joined to
+      anything else, and nobody is profiled from them.
+      Container logs roll at 10 MB with five files kept per service, so a log line survives
+      roughly days to weeks at current traffic rather than indefinitely.
+    </p>
+
+    <h2>The hosted product: what we hold</h2>
+
+    <h3>Your account</h3>
+    <ul>
+      <li>Your name and email address.</li>
+      <li>Your password, stored only as a bcrypt hash. We cannot read it and cannot tell you what it is.</li>
+      <li>The name of your organisation, and your role in it (administrator, engineer or viewer).</li>
+      <li>An avatar image URL, if one is set.</li>
+      <li>When the account was created.</li>
+    </ul>
+    <p>
+      Sign-in to the hosted product is by email address and password. We do not currently
+      offer sign-in through Google or any other identity provider on saas.turboplm.com.
+    </p>
+
+    <h3>What you put in</h3>
+    <p>
+      Everything you create in the application: parts and their revisions, bills of material,
+      manufacturing processes, engineering change requests and notices, requirements,
+      projects, quality records, serial and lot records, cost figures, and files you upload —
+      drawings, CAD models, specifications, images. Uploaded files are stored on our server's
+      disk, not in a third-party object store.
+    </p>
+    <p>
+      Some of that is personal data about other people, because PLM is full of names: supplier
+      and manufacturer contacts, supplier portal users you invite, colleagues you invite by
+      email. You decide what goes in. In data protection terms, for that content <strong>you
+      are the controller and we are your processor</strong> — we hold it to run the service for
+      you and for no other purpose.
+    </p>
+
+    <h3>The audit log</h3>
+    <p>
+      Change control is worthless if nobody can see who changed what, so every successful
+      write through the API is recorded. Each entry holds:
+    </p>
+    <ul>
+      <li>the user who made the request,</li>
+      <li>the HTTP method and path (for example <code>POST /parts/1042/revisions</code>),</li>
+      <li>the type and id of the thing affected,</li>
+      <li>the body of the request — the actual values submitted — with any field named
+        <code>password</code>, <code>passwordHash</code>, <code>token</code> or
+        <code>secret</code> replaced by <code>[redacted]</code> before it is written,</li>
+      <li>and the timestamp.</li>
+    </ul>
+    <p>
+      It does not record IP addresses. It is visible inside the application to signed-in
+      members of your own organisation, and to nobody outside it. It is not pruned: it is the
+      record, and a record with gaps is not one.
+    </p>
+
+    <h3>Payments</h3>
+    <p>
+      Payment is processed by <strong>Stripe</strong>. Card numbers are entered on Stripe's own
+      checkout pages and never touch our servers — we could not store them if we wanted to.
+      What we keep is the Stripe customer and subscription identifiers, the status word Stripe
+      gives us (<code>active</code>, <code>past_due</code>, <code>canceled</code> and so on) and
+      the date the paid period ends. The merchant of record is Hai-Soft Inc. Stripe's own
+      privacy policy is at <a href="https://stripe.com/privacy" rel="noreferrer">stripe.com/privacy</a>.
+    </p>
+
+    <h3>Email</h3>
+    <p>
+      The application sends transactional email only: invitations to join an organisation, and
+      notifications about work assigned to you. It is sent from
+      <code>office@turboplm.com</code> through Microsoft 365. There is no marketing list, and
+      nothing you do in the product subscribes you to one.
+    </p>
+
+    <h2>Cookies</h2>
+    <p>
+      The hosted product sets one cookie, <code>turboplm_token</code>. It holds a signed
+      session token, lasts seven days, is marked <code>HttpOnly</code> so no script can read it,
+      and is sent only over HTTPS. Without it you cannot stay signed in, which is why there is
+      no banner asking permission for it — a cookie that is strictly necessary to deliver the
+      thing you asked for does not need consent.
+    </p>
+    <p>
+      There are no analytics cookies, no advertising cookies and no third-party cookies
+      anywhere on turboplm.com, demo.turboplm.com or saas.turboplm.com.
+    </p>
+
+    <h2>Where it is hosted, and who else touches it</h2>
+    <p>
+      The hosted product runs in Docker containers on a server operated by us — the
+      application, the Postgres database and the file storage are all on that one machine,
+      behind a reverse proxy that terminates TLS. Data is not spread across a cloud provider's
+      managed services.
+    </p>
+    <p>
+      Server location: Ontario, Canada. The hosted service runs on infrastructure we operate
+      there, not on a third-party managed platform.
+    </p>
+    <p>These are the only third parties that process data for us:</p>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>Who</th><th>What for</th><th>What they get</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Stripe</td>
+            <td>Taking payment for the Pro plan</td>
+            <td>Your billing email and card details, entered directly with them; the name of your organisation</td>
+          </tr>
+          <tr>
+            <td>Microsoft</td>
+            <td>Sending invitation and notification email</td>
+            <td>The recipient's email address and the contents of that email</td>
+          </tr>
+          <tr>
+            <td><span class="todo">operated by us, in Ontario, Canada</span></td>
+            <td>Running the server</td>
+            <td>Everything stored, at rest on their infrastructure</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Stripe and Microsoft are global companies and may process data outside the country you
+      are in, and both publish their own transfer safeguards. We have not independently
+      verified which mechanism applies to your jurisdiction, and this notice deliberately does
+      not claim one it has not checked — if your procurement process needs that confirmed in
+      writing, ask us and we will get it confirmed rather than guess.
+    </p>
+    <p>
+      Nobody else. We do not sell data, we do not share it with advertisers, and we do not use
+      your engineering data to train machine learning models — ours or anyone else's.
+    </p>
+
+    <h2>Backups</h2>
+    <p>
+      The database and the uploaded files are dumped to disk on the same server once a day,
+      and those dumps are deleted after 14 days. That is the whole backup arrangement, stated
+      plainly because it matters to two different questions: how much you would lose in a
+      failure, and how long a deletion takes to become total. Data you ask us to delete is
+      gone from the live database immediately and disappears from the last backup within 14
+      days.
+    </p>
+
+    <h2>How long we keep things</h2>
+    <ul>
+      <li><strong>Your account and your product data</strong> — for as long as the account
+        exists. We do not expire or delete inactive accounts, and letting a paid plan lapse
+        deletes nothing: you keep everything you created, you simply cannot create more than
+        the free limits.</li>
+      <li><strong>The audit log</strong> — for the life of the organisation, deliberately.</li>
+      <li><strong>Backups</strong> — 14 days, as above.</li>
+      <li><strong>Web server logs</strong> — bounded by log rotation, as described above.</li>
+      <li><strong>Billing records</strong> — Stripe keeps payment records for as long as tax
+        law requires them, on its own schedule, and we cannot shorten that.</li>
+    </ul>
+
+    <h2>Your rights, and what actually happens when you use them</h2>
+    <p>
+      If you are in the UK or the EU you have the right to a copy of your personal data, to
+      have it corrected, to have it deleted, to restrict or object to how it is used, and to
+      complain to your data protection authority. We will honour those rights wherever you
+      are. Write to
+      <a href="mailto:office@turboplm.com?subject=Data%20request">office@turboplm.com</a>.
+    </p>
+    <p>
+      We would rather describe how these are handled today than quote a service level we have
+      not built:
+    </p>
+    <ul>
+      <li><strong>A copy of your data.</strong> Parts and bills of material can be exported
+        from inside the application at any time as CSV or JSON. Anything beyond that we
+        produce by hand on request.</li>
+      <li><strong>Deletion.</strong> There is no button that deletes an account or an
+        organisation. It is done by hand after an email request, by a person, and we will not
+        promise you a turnaround we have not measured. Removing a single member from an
+        organisation <em>is</em> available to administrators in the application — with one
+        honest caveat: if that person created parts, changes, documents or signed anything,
+        the system refuses to delete their user record, because deleting it would silently
+        rewrite the change history that the record exists to preserve. In that case tell us
+        and we will discuss what can be anonymised without destroying the audit trail.</li>
+      <li><strong>Correction.</strong> Your name and email are editable in the application.</li>
+    </ul>
+    <p>
+      Complaints: if you are in the UK or the EEA and you are unhappy with how we have handled
+      your data, you may complain to your national data protection authority. We would rather
+      you told us first, at <a href="mailto:office@turboplm.com">office@turboplm.com</a>, so we
+      have a chance to put it right.
+    </p>
+
+    <h2>Security, and what we do not claim</h2>
+    <p>What is actually in place:</p>
+    <ul>
+      <li>HTTPS everywhere, with certificates renewed automatically. There is no plain-HTTP
+        route into anything.</li>
+      <li>Passwords stored as bcrypt hashes, never in readable form.</li>
+      <li>Session cookies that scripts cannot read and that only travel over TLS.</li>
+      <li>Tenant isolation enforced by Postgres row-level security underneath the application
+        rather than by a filter the code has to remember to apply — the database refuses to
+        return another organisation's rows even if the application asks.</li>
+      <li>Item-level access control inside an organisation, so a restricted part or document
+        is invisible rather than merely forbidden.</li>
+      <li>Daily backups, as described above.</li>
+    </ul>
+    <p>
+      What we do not claim: we hold <strong>no</strong> SOC 2 report, <strong>no</strong> ISO
+      27001 certificate and no third-party security audit, and there is no such thing as a GDPR
+      certification, so nobody honest displays one. We are a small company and this notice
+      describes a small company's arrangements. If your procurement process needs one of those
+      certificates, tell us before you spend time on an evaluation — we would rather say so now
+      than at the end.
+    </p>
+
+    <h2>If you self-host</h2>
+    <p>
+      The open-source build under the GNU AGPL v3 contains no telemetry, no analytics, no
+      usage reporting and no licence check. It never contacts us. When you run it on your own
+      hardware, you are the controller and the processor: your users' accounts, your product
+      data and your audit log are on your machines, we cannot see them, and nothing in this
+      notice gives us any access. Your obligations to your own users and to the people named in
+      your data are yours.
+    </p>
+
+    <h2>The public demo</h2>
+    <p>
+      demo.turboplm.com is one shared instance holding sample data. Accounts created there are
+      read-only, but the email address and name you register with are visible to us, and the
+      instance may be reset without notice. Treat it as a public space: do not enter anything
+      confidential, and do not reuse a password you use elsewhere.
+    </p>
+
+    <h2>Changes to this notice</h2>
+    <p>
+      If we change how any of this works, we will change this page and move the date at the
+      top. For a change that materially affects data we already hold for you, we will email
+      the administrators of each organisation rather than rely on you noticing.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      <a href="mailto:office@turboplm.com?subject=Data%20protection%20enquiry">office@turboplm.com</a>
+      — for a copy of your data, a correction, a deletion, a security question, or to tell us
+      something on this page is wrong.
+    </p>
+
+  </div></div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="color:#fff;margin-bottom:12px"><span class="mark">T</span> TurboPLM</div>
+        <p style="max-width:42ch;font-size:.92rem;color:#9fb3cd">
+          Self-hosted product lifecycle management for teams that build physical things —
+          product structure, BOM, revisioning and engineering change control.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="/#capabilities">Capabilities</a>
+        <a href="/#demo">Live demo</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/#selfhosted">Self-hosted</a>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <a href="/terms">Terms of service</a>
+        <a href="/privacy">Privacy notice</a>
+        <a href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <span>© 2026 TurboPLM — operated by Hai-Soft Inc</span>
+      <span>Open source under the GNU AGPL v3.</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

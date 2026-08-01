@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terms of service — TurboPLM</title>
+<meta name="description" content="The terms for the hosted TurboPLM service, the public demo, and the paid services around them." />
+<!-- See the note in privacy.html: legal pages should not compete with the product
+     page in search results, but links from them should still be followed. -->
+<meta name="robots" content="noindex, follow" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/legal.css" />
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="mark">T</span> TurboPLM</a>
+    <nav class="nav-links">
+      <a href="/#capabilities">Capabilities</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/#selfhosted">Self-hosted</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://saas.turboplm.com/login">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Terms</div>
+    <h1>Terms of service</h1>
+
+    <div class="notice" style="border:1px solid var(--warn);background:rgba(196,127,10,.08);
+         border-radius:10px;padding:16px 18px;margin:0 0 28px">
+      <strong>These terms are provisional.</strong> They describe honestly how the service works
+      today, but four points — the limitation of liability, the governing law, the tax treatment
+      of the price, and the statutory cancellation right for consumers — have not yet been settled
+      with a solicitor and are marked below. Until they are, treat this page as a statement of
+      intent rather than the final agreement, and
+      <a href="mailto:office@turboplm.com">ask us</a> if you need a signed contract.
+    </div>
+    <p class="meta">Last updated 1 August 2026.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="callout legal" style="max-width:none">
+      <h3 style="margin-top:0">The short version</h3>
+      <p>
+        Free is free and does not expire. Pro is 10 USD a month for the whole organisation,
+        billed by Stripe, cancellable at any time. Your product data stays yours and letting a
+        plan lapse never deletes it. The software you run yourself is under the GNU AGPL v3
+        and those terms, not these, govern it.
+      </p>
+      <p style="margin-bottom:0">
+        We do not promise uptime on the free or 10-dollar plans, and we say so below rather
+        than bury it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <!-- .legal nests INSIDE .wrap rather than sharing an element with it: .wrap carries
+       `margin:0 auto`, so a narrower max-width on the same element centres the whole
+       column and leaves the body text out of alignment with the heading above it. -->
+  <div class="wrap"><div class="legal">
+
+    <h2>1. Who you are agreeing with</h2>
+    <p>
+      These terms are between you — and the organisation you sign up on behalf of — and
+      <strong>Hai-Soft Inc</strong> ("we", "us"), which operates TurboPLM.
+      Registered address: available on request — write to <a href="mailto:office@turboplm.com">office@turboplm.com</a>.
+      Company registration number: available on request.
+      Contact: <a href="mailto:office@turboplm.com?subject=TurboPLM%20terms">office@turboplm.com</a>.
+    </p>
+    <p>
+      By creating an account you confirm you are old enough to enter a contract where you live
+      and that you may accept these terms for the organisation you name during registration.
+    </p>
+
+    <h2>2. What these terms cover</h2>
+    <ul>
+      <li><strong>The hosted service</strong> at saas.turboplm.com — sections 3 to 10.</li>
+      <li><strong>The public demo</strong> at demo.turboplm.com — section 11.</li>
+      <li><strong>The paid services</strong> (migration, integration, installation, advisory,
+        support) — section 12.</li>
+    </ul>
+    <p>
+      They do <strong>not</strong> cover the software itself when you download and run it. That
+      is licensed to you under the GNU Affero General Public License v3, and the licence is the
+      whole agreement for it — see section 13.
+    </p>
+
+    <h2>3. Your account</h2>
+    <p>
+      Registering creates an organisation and makes you its administrator. You are responsible
+      for the accounts you create inside it and for keeping your own credentials safe; anything
+      done with your sign-in is treated as done by you. Tell us promptly at
+      <a href="mailto:office@turboplm.com?subject=Security">office@turboplm.com</a> if you
+      believe an account has been compromised.
+    </p>
+    <p>
+      Administrators can invite and remove members. Removing the last remaining administrator
+      is refused by the system, so an organisation cannot lock itself out.
+    </p>
+
+    <h2>4. Plans and what they cost</h2>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr><th>Plan</th><th>Price</th><th>Limits</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Free</td>
+            <td>0 USD</td>
+            <td>One member and up to 100 parts. Every module, exactly as Pro has it. No card, no expiry — it does not turn into a trial.</td>
+          </tr>
+          <tr>
+            <td>Pro</td>
+            <td>10 USD per month, per organisation — not per person</td>
+            <td>Unlimited members, unlimited parts. The same software, with those two limits removed.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Prices are in US dollars.
+      <span class="todo">TODO: state whether the price is exclusive or inclusive of VAT / sales
+      tax, and how EU and UK VAT is handled — a business buyer will ask before raising a
+      purchase order</span>.
+    </p>
+
+    <h2>5. Billing, cancellation and refunds</h2>
+    <p>
+      Pro is billed monthly in advance through <strong>Stripe</strong>, which handles the
+      payment and stores the card. We never see your card details. Your plan changes when
+      Stripe tells us the payment succeeded, not when the checkout page closes.
+    </p>
+    <p>
+      An administrator can cancel at any time from the billing page in the application, which
+      opens Stripe's own portal. Cancelling stops future charges; the organisation stays on Pro
+      until the end of the period you have already paid for, and then returns to Free.
+    </p>
+    <p>
+      We do not run automatic refunds. If something went wrong — a duplicate charge, a
+      subscription you meant to cancel and did not, a month you could not use — email us and we
+      will sort it out. If you are a consumer rather than a business, your statutory
+      cancellation rights are unaffected by anything here.
+      <span class="todo">TODO: have a solicitor confirm the consumer cancellation wording for
+      the jurisdictions being sold into</span>.
+    </p>
+    <p>
+      If a payment fails, Stripe retries on its own schedule. We may suspend an organisation
+      whose subscription has not been paid, and if we do, we will tell the administrators
+      first.
+    </p>
+
+    <h2>6. What happens when a plan ends</h2>
+    <p>
+      Nothing is deleted, hidden or locked. An organisation that had 4,000 parts on Pro and
+      drops to Free keeps all 4,000 of them and can keep reading and editing them; it simply
+      cannot create the 4,001st, or add a second member, until it is on Pro again. This is a
+      deliberate decision, not an oversight — a customer whose card expired should not lose
+      access to their engineering record, and holding data hostage is not a way to collect a
+      debt.
+    </p>
+
+    <h2>7. Your data</h2>
+    <p>
+      Everything you put into TurboPLM stays yours. We claim no ownership of it, we do not use
+      it to train machine learning models, and we do not share it with anyone except the
+      processors named in the <a href="/privacy">privacy notice</a>. We access it only to run
+      the service, to fix a fault, or because you have asked us to help with something
+      specific.
+    </p>
+    <p>
+      Parts and bills of material can be exported as CSV or JSON from inside the application at
+      any time, so leaving does not require our cooperation. How we handle account data,
+      deletion requests and the audit trail is set out in the
+      <a href="/privacy">privacy notice</a>, which forms part of these terms.
+    </p>
+
+    <h2>8. Acceptable use</h2>
+    <p>Do not use the hosted service to:</p>
+    <ul>
+      <li>break the law, or infringe someone else's intellectual property or export controls;</li>
+      <li>store material you have no right to store;</li>
+      <li>attack, probe or overload the service, or attempt to reach another organisation's
+        data;</li>
+      <li>resell access to the hosted service as if it were your own — note that this restricts
+        our hosting, not the software, which the AGPL lets you run and offer to others on your
+        own infrastructure.</li>
+    </ul>
+    <p>
+      We may suspend an account that is actively causing harm, and will explain why. For
+      anything that is not an emergency we will raise it with you first.
+    </p>
+
+    <h2>9. Availability</h2>
+    <p>
+      We aim to keep the service up and we watch it, but the Free and Pro plans carry
+      <strong>no service level agreement, no uptime guarantee and no support commitment</strong>.
+      Ten dollars a month does not buy a 24/7 response, and pretending otherwise would be the
+      first promise we broke. Maintenance can mean short interruptions. If you need a response
+      time you can plan around, that is what the support agreements in section 12 are for.
+    </p>
+
+    <h2>10. Ending it</h2>
+    <p>
+      You can stop using the service whenever you like; cancel the subscription first so you
+      are not billed again, then email us if you want the organisation and its data deleted.
+      We may end this agreement for a serious or repeated breach of section 8, or if we
+      discontinue the hosted service — in which case we will give you reasonable notice and
+      time to export, and the self-hosted build remains available under the AGPL so there is
+      always somewhere to land.
+    </p>
+
+    <h2>11. The public demo</h2>
+    <p>
+      demo.turboplm.com is a single shared instance provided for evaluation, seeded with sample
+      data. Accounts created on it are read-only. It has no confidentiality and no durability:
+      everything in it is visible to every other visitor, and it may be reset or taken down at
+      any time without notice. Do not put real product data into it, and do not reuse a
+      password you use anywhere else.
+    </p>
+
+    <h2>12. Services</h2>
+    <p>
+      Data migration, ERP and CAD integration, installation on your own infrastructure,
+      advisory work and support agreements are quoted and contracted separately. The prices on
+      the marketing site are starting points, not offers — the scope moves them, and you get a
+      fixed number in writing before any work begins. Each engagement has its own statement of
+      work, and where it conflicts with these terms, it wins.
+    </p>
+    <p>
+      One thing worth repeating from that page: TurboPLM is open source, so every bug fix and
+      security patch is published and free to you whether or not you pay for support. A support
+      agreement buys priority, a response time, and somebody who performs the upgrade — never
+      access to a fix.
+    </p>
+
+    <h2>13. The self-hosted software</h2>
+    <p>
+      TurboPLM's source is published under the <strong>GNU Affero General Public License,
+      version 3</strong>. You may read it, run it, modify it and use it for anything, including
+      commercially; if you modify it and offer it to others over a network, you must publish
+      your changes. That licence, not this page, governs your use of the software, and it
+      includes the licence's own disclaimer of warranty. We give no separate warranty for it,
+      and running it is at your own risk.
+    </p>
+
+    <h2>14. Liability</h2>
+    <p>
+      The hosted service is provided as it is. To the extent the law allows, we are not liable
+      for indirect or consequential loss, lost profit, lost production, or the cost of
+      reconstructing data you did not export.
+      <span class="todo">TODO: this section needs a solicitor. Decide the liability cap
+      (commonly the fees paid in the preceding 12 months — which on a 10 USD plan is 120 USD,
+      and that number needs to be stated deliberately rather than by accident), and the
+      carve-outs that cannot be excluded: death or personal injury caused by negligence, fraud,
+      and anything else non-excludable in the jurisdictions being sold into</span>.
+    </p>
+    <p>
+      Keep your own backups of anything you cannot afford to lose. Ours are described in the
+      <a href="/privacy">privacy notice</a>; they exist to recover the service, and they are not
+      a substitute for your own copy.
+    </p>
+
+    <h2>15. Changes to these terms</h2>
+    <p>
+      We may update these terms. The date at the top changes when we do. For a change that
+      materially affects a paying customer we will email the organisation's administrators
+      before it takes effect, and continuing to use the service after that is acceptance. If
+      you do not accept a change, cancel — see section 5.
+    </p>
+
+    <h2>16. Governing law</h2>
+    <p>
+      <span class="todo">TODO: governing law and the courts with jurisdiction. This has to match
+      where Hai-Soft Inc is actually established, and it is the clause an EU or UK buyer's legal
+      team reads first</span>.
+    </p>
+
+    <h2>17. Contact</h2>
+    <p>
+      <a href="mailto:office@turboplm.com?subject=TurboPLM%20terms">office@turboplm.com</a> —
+      for anything about these terms, billing, or an engagement.
+    </p>
+
+  </div></div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="color:#fff;margin-bottom:12px"><span class="mark">T</span> TurboPLM</div>
+        <p style="max-width:42ch;font-size:.92rem;color:#9fb3cd">
+          Self-hosted product lifecycle management for teams that build physical things —
+          product structure, BOM, revisioning and engineering change control.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="/#capabilities">Capabilities</a>
+        <a href="/#demo">Live demo</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/#selfhosted">Self-hosted</a>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <a href="/terms">Terms of service</a>
+        <a href="/privacy">Privacy notice</a>
+        <a href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <span>© 2026 TurboPLM — operated by Hai-Soft Inc</span>
+      <span>Open source under the GNU AGPL v3.</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
