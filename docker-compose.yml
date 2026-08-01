@@ -67,7 +67,17 @@ services:
       - edge
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # PUBLIC DEMO ONLY. A shared read-only VIEWER account so a visitor arriving from
+        # turboplm.com lands inside the seeded quadcopter instead of an empty login form.
+        # VIEWER cannot mutate anything (requireWriteRole), and the credential is meant to
+        # be used by strangers — that is what makes shipping it in the bundle correct here
+        # and wrong anywhere else. Unset in every other deployment, where the button then
+        # does not render at all.
+        - VITE_DEMO_EMAIL=demo@turboplm.com
+        - VITE_DEMO_PASSWORD=explore-turboplm
     container_name: turboplm-web
     ports:
       - "127.0.0.1:3010:80"   # local access only; the internet arrives via the edge proxy

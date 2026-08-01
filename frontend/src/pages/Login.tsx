@@ -10,7 +10,7 @@ import {
   Input,
   Typography,
 } from 'antd';
-import { GoogleOutlined, LockOutlined, MailOutlined, RocketOutlined } from '@ant-design/icons';
+import { EyeOutlined, GoogleOutlined, LockOutlined, MailOutlined, RocketOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -36,6 +36,22 @@ const SIGN_IN_ERRORS: Record<string, string> = {
     'Your provider has not verified that email address, so it cannot be used to sign in. Verify it with your provider, or sign in with a password.',
 };
 
+/**
+ * The shared read-only account on the public demo, or empty everywhere else.
+ *
+ * Set as a build argument on the demo deployment ONLY. When it is empty — every other
+ * build, including the SaaS — the button below does not render and this file behaves
+ * exactly as it did before.
+ *
+ * A password in browser JavaScript is normally the defect. Here the account is a VIEWER,
+ * `requireWriteRole` refuses every mutation from a VIEWER app-wide, and the entire point
+ * is that any stranger may sign in with it. A credential you are inviting the public to
+ * use is not a secret being leaked.
+ */
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL as string | undefined;
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD as string | undefined;
+const DEMO_LOGIN_ENABLED = Boolean(DEMO_EMAIL && DEMO_PASSWORD);
+
 export default function Login() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
@@ -60,10 +76,10 @@ export default function Login() {
 
   if (user) return <Navigate to="/" replace />;
 
-  const onFinish = async (values: LoginValues) => {
+  const signIn = async (email: string, password: string) => {
     setSubmitting(true);
     try {
-      const me = await api.login(values.email, values.password);
+      const me = await api.login(email, password);
       setUser(me);
       const from = (location.state as any)?.from;
       navigate(from ? `${from.pathname}${from.search ?? ''}` : '/');
@@ -73,6 +89,8 @@ export default function Login() {
       setSubmitting(false);
     }
   };
+
+  const onFinish = (values: LoginValues) => signIn(values.email, values.password);
 
   return (
     <div
@@ -103,6 +121,41 @@ export default function Login() {
             message={SIGN_IN_ERRORS[searchParams.get('error') ?? '']}
             style={{ marginBottom: 16 }}
           />
+        )}
+        {/*
+          ABOVE the form deliberately.
+
+          Someone arriving from turboplm.com's "Try the live demo" has been promised a
+          running instance full of real product data, and what they used to meet was an
+          empty email box. Registering first is friction at precisely the moment attention
+          is highest, and it asks for an email address before showing anything worth the
+          address. One click, no typing, straight into the quadcopter.
+        */}
+        {DEMO_LOGIN_ENABLED && (
+          <>
+            <Button
+              block
+              size="large"
+              type="primary"
+              icon={<EyeOutlined />}
+              loading={submitting}
+              onClick={() => void signIn(DEMO_EMAIL!, DEMO_PASSWORD!)}
+            >
+              Explore the demo
+            </Button>
+            <Typography.Paragraph
+              type="secondary"
+              style={{ fontSize: 12, textAlign: 'center', margin: '10px 0 0' }}
+            >
+              Read-only, no signup. Everything is real seeded product data — a four-level
+              quadcopter with revisions, changes and build units.
+            </Typography.Paragraph>
+            <Divider plain style={{ margin: '12px 0' }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                or sign in
+              </Typography.Text>
+            </Divider>
+          </>
         )}
         <Form<LoginValues> layout="vertical" onFinish={onFinish} requiredMark={false}>
           <Form.Item
