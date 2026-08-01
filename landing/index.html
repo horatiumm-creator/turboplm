@@ -152,8 +152,13 @@
       <a href="#change">Change control</a>
       <a href="#access">Access</a>
       <a href="#demo">Live demo</a>
+      <a href="#pricing">Pricing</a>
       <a href="#selfhosted">Self-hosted</a>
       <a href="#consulting">Consulting</a>
+      <!-- The one link on this page for someone who is already a customer. It goes to the
+           hosted product, NOT to the demo instance: a returning user typing their password
+           into a shared read-only demo is a support ticket that looks like a broken login. -->
+      <a href="https://saas.turboplm.com/login">Sign in</a>
     </nav>
   </div>
 </header>
@@ -162,19 +167,33 @@
 
 <section class="hero">
   <div class="wrap">
-    <div class="eyebrow">Self-hosted product lifecycle management</div>
+    <!-- Was "Self-hosted product lifecycle management". Accurate, but as the first line on the
+         page it answered a question nobody had yet asked and closed off the one that matters:
+         a reader who learns "self-hosted" before anything else concludes there is nothing here
+         to sign up for and leaves. Self-hosting is still true, still free, and still has its
+         own section — it is a way to run it, not the category it belongs to. -->
+    <div class="eyebrow">Product lifecycle management for hardware teams</div>
     <h1>Your product structure, under your control</h1>
     <p class="lede">
       TurboPLM manages the things a hardware team actually lives in: the part master, the
       multi-level bill of materials, revisions and their lifecycles, manufacturing
       processes, and the engineering change control that keeps all of it honest — then
       follows the product past release, into what was built and what came back from the
-      field. It runs on your own hardware, in Docker, with one command.
+      field. Start on ours in a minute, or run the whole thing on your own hardware.
     </p>
+    <!-- The primary action is starting, not looking. "Try the live demo" was the primary
+         button and it led to a read-only account on a shared instance — the most prominent
+         thing on the page asked people to browse someone else's data rather than open their
+         own workspace. The demo is still one click away, as the secondary. -->
     <div class="cta">
-      <a class="btn btn-primary" href="#demo">Try the live demo</a>
+      <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
+      <a class="btn btn-ghost" href="#demo">Try the live demo</a>
       <a class="btn btn-ghost" href="#consulting">Get expert help</a>
     </div>
+    <p class="hero-note">
+      Free for one person and up to 100 parts, with no card. Or run it on your own
+      hardware — <a href="#selfhosted">the whole thing is open source</a>.
+    </p>
     <div class="mock" aria-label="Illustration of the TurboPLM bill-of-materials view">
       <div class="mock-bar">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
@@ -536,10 +555,18 @@
           read-only, so you can explore the whole system without changing the shared
           demo data.
         </p>
+        <!-- "Sign up free" used to live here, pointing at the demo. It was the most
+             conversion-shaped phrase on the page attached to the one destination that is not
+             the product: a read-only account on an instance whose data everyone shares. The
+             label now says what the button actually does. Starting for real is #pricing. -->
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <a class="btn btn-primary" href="https://demo.turboplm.com/register">Sign up free</a>
-          <a class="btn btn-ghost" href="https://demo.turboplm.com/login">Sign in</a>
+          <a class="btn btn-primary" href="https://demo.turboplm.com/register">Create a demo account</a>
+          <a class="btn btn-ghost" href="https://demo.turboplm.com/login">Sign in to the demo</a>
         </div>
+        <p style="color:var(--muted);font-size:.9rem;margin:14px 0 0;max-width:52ch">
+          Looking for your own private workspace instead?
+          <a href="#pricing">Start free</a> — nothing shared, nothing read-only.
+        </p>
       </div>
       <ul class="check" style="margin:0">
         <li>No approval step — you are in immediately</li>
@@ -555,6 +582,71 @@
     </p>
   </div>
 </section>
+
+<!-- ===========================================================================
+     PRICING
+     Sits between the demo and the self-hosted section on purpose: a reader who has
+     just been told the demo is read-only and shared needs the next thing they see to
+     be how to get one that is not, and a reader who then decides they would rather run
+     it themselves finds that immediately below.
+
+     The price is stated in full, in the card, at full size. An earlier draft put the
+     Pro offer in muted small print; the nav item that brings people here says
+     "Pricing", and answering that click with a footnote wastes it.
+     =========================================================================== -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="eyebrow">Pricing</div>
+    <h2>Free to start. 10 USD a month when you outgrow it.</h2>
+    <p class="lede">
+      The <a href="#demo">live demo</a> is read-only and shared. This is the real thing:
+      your own workspace, your own parts, yours to change. Both plans are the same
+      software — every module, nothing held back for the paid one. The only differences
+      are the two limits below.
+    </p>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3>Free</h3>
+        <div style="margin:2px 0 6px"><strong style="font-size:2rem">0 USD</strong></div>
+        <p style="margin:0 0 18px">No card required. No expiry — it does not turn into a trial.</p>
+        <ul class="check">
+          <li>One member — just you</li>
+          <li>Up to 100 parts</li>
+          <li>Every module, exactly as Pro has it</li>
+          <li>Your own private workspace, not the shared demo</li>
+        </ul>
+        <div style="margin-top:20px">
+          <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Pro</h3>
+        <div style="margin:2px 0 6px"><strong style="font-size:2rem">10 USD</strong> per month</div>
+        <p style="margin:0 0 18px">One price for the whole organisation, not per person.</p>
+        <ul class="check">
+          <li>Unlimited members — invite everyone, the price does not move</li>
+          <li>Unlimited parts</li>
+          <li>The same software as Free, with those two limits removed</li>
+          <li>Monthly by card through Stripe. Cancel any time.</li>
+        </ul>
+        <p style="margin:18px 0 0">
+          Start on Free and move up from inside your workspace, the day a second person
+          needs in or the day you reach part 101.
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top:24px">
+      There is no trial of Pro to forget to cancel, and no card on file on Free to charge.
+      Already have an account? <a href="https://saas.turboplm.com/login">Sign in</a>.
+      Would rather run it on your own hardware?
+      <a href="#selfhosted">The open-source version</a> is free too, with no limits at all.
+    </p>
+  </div>
+</section>
+
 
 <section class="alt" id="selfhosted">
   <div class="wrap">
@@ -628,6 +720,8 @@
         <a href="#change">Change control</a>
         <a href="#access">Access control</a>
         <a href="#demo">Live demo</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://saas.turboplm.com/register">Start free</a>
         <a href="#selfhosted">Self-hosted</a>
       </div>
       <div>
