@@ -88,6 +88,22 @@ export default function AppLayout() {
   const { token } = theme.useToken();
 
   // Global search
+  /*
+   * The rail's collapse state, owned here rather than left inside the Sider.
+   *
+   * An uncontrolled Sider still collapses at the breakpoint, but it never tells the rest of
+   * the component — so the brand block went on rendering at full width inside a 64px rail and
+   * the wordmark wrapped to one letter per line, roughly 250px tall. Owning `collapsed` means
+   * the brand block and the Sider agree about which layout they are in.
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  /*
+   * Whether the viewport is below the Sider's breakpoint. Separate from `collapsed` because
+   * the header has to trim itself for a narrow screen even in the moment before the rail has
+   * collapsed — and because a user who expands the rail by hand on a phone should not get the
+   * full-width header back on top of it.
+   */
+  const [belowBreakpoint, setBelowBreakpoint] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const searchTimer = useRef<number | undefined>(undefined);
@@ -314,21 +330,41 @@ export default function AppLayout() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider breakpoint="lg" collapsedWidth="64" width={220}>
+      {/*
+        `collapsible` is what puts a trigger on the rail — without it a narrow-viewport user
+        gets a 64px strip of icons and no way back to the labels.
+      */}
+      <Sider
+        breakpoint="lg"
+        collapsedWidth={64}
+        width={220}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        onBreakpoint={setBelowBreakpoint}
+      >
         <Link
           to="/"
           style={{
             display: 'flex',
             alignItems: 'center',
+            justifyContent: collapsed ? 'center' : 'flex-start',
             gap: 10,
-            padding: '18px 20px',
+            padding: collapsed ? '18px 0' : '18px 20px',
             color: '#fff',
           }}
         >
           <RocketOutlined style={{ fontSize: 24, color: token.colorPrimary }} />
-          <Typography.Text strong style={{ color: '#fff', fontSize: 17 }}>
-            TurboPLM
-          </Typography.Text>
+          {/*
+            Dropped, not shrunk. 64px minus the icon and its gap leaves about 20px of text
+            column, and "TurboPLM" in that space wraps to one letter per line — a 250px stack
+            of capitals, which is what a phone visitor used to meet first.
+          */}
+          {!collapsed && (
+            <Typography.Text strong style={{ color: '#fff', fontSize: 17 }}>
+              TurboPLM
+            </Typography.Text>
+          )}
         </Link>
         <Menu
           theme="dark"
@@ -425,7 +461,8 @@ export default function AppLayout() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            paddingInline: 24,
+            paddingInline: belowBreakpoint ? 12 : 24,
+            gap: 8,
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
           }}
         >
@@ -433,7 +470,7 @@ export default function AppLayout() {
             <AutoComplete
               value={searchValue}
               options={searchOptions}
-              style={{ width: 320 }}
+              style={{ width: belowBreakpoint ? 150 : 320 }}
               onSearch={handleSearch}
               onSelect={handleSearchSelect}
               popupMatchSelectWidth={360}
