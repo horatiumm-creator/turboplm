@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Unsubscribe — TurboPLM</title>
+<meta name="description" content="Stop receiving email from TurboPLM." />
+<!-- noindex, and `noarchive` on top of the usual: this page exists to be reached from a
+     link in an email, by the one person who wants it. It has no business in search
+     results, and a cached copy helps nobody. -->
+<meta name="robots" content="noindex, noarchive, follow" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/legal.css" />
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/"><span class="mark">T</span> TurboPLM</a>
+    <nav class="nav-links">
+      <a href="/#capabilities">Capabilities</a>
+      <a href="/#pricing">Pricing</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Unsubscribe</div>
+    <h1>Stop hearing from us</h1>
+    <p class="lede">
+      One click below and you are off the list. No form to fill in, no account to make, and
+      no question about why you are leaving.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap"><div class="legal">
+
+    <!--
+      A mailto, not a form.
+
+      A form needs somewhere to POST, and this site is static nginx with no backend. The
+      honest options were a form that quietly does nothing, or a link that genuinely
+      reaches a person. CASL asks that the mechanism be "readily performed" — one click
+      that opens a pre-addressed message clears that bar; a form that discards the request
+      would be worse than no page at all, and unlawful besides.
+
+      No recipient address is embedded in the link. Personalised unsubscribe URLs are the
+      convenient way to do this, and they put someone's email address into a URL that then
+      lands in server logs, browser history and any proxy in between. Not worth it for a
+      list this size.
+    -->
+    <p style="margin:26px 0">
+      <a class="btn btn-primary" style="font-size:1.05rem;padding:14px 26px"
+         href="mailto:office@turboplm.com?subject=unsubscribe&amp;body=Please%20remove%20this%20address%20from%20your%20mailing%20list.">
+        Unsubscribe by email
+      </a>
+    </p>
+
+    <p>
+      That opens a message to <a href="mailto:office@turboplm.com">office@turboplm.com</a>
+      with the subject already filled in. Send it as it is — you do not need to write
+      anything. If your device does not open a mail client, write to that address from the
+      account you want removed and put <strong>unsubscribe</strong> in the subject.
+    </p>
+
+    <h2>What happens then</h2>
+    <p>
+      Your address goes on a suppression list and we stop. In practice that is same-day;
+      the law allows ten business days and we are not going to use them. The list is kept
+      precisely so that we can tell we have already been asked — which means the address is
+      retained for that purpose and nothing else, and it is never mailed, sold or shared.
+    </p>
+    <p>
+      This link keeps working. Canadian anti-spam law requires an unsubscribe mechanism to
+      stay live for at least 60 days after a message is sent; this one is a permanent page
+      and a mailbox that is read.
+    </p>
+
+    <h2>If you would rather not write to us</h2>
+    <p>
+      Marking the message as spam in your mail client also works, and we would rather you
+      did that than receive another one. It is a blunter signal — it teaches your provider
+      to filter us rather than telling us to stop — so the link above is better for both of
+      us, but either is a clear answer and we will treat it as one.
+    </p>
+
+    <h2>This is not your TurboPLM account</h2>
+    <p>
+      This page is only about email we sent you. If you have an account at
+      <a href="https://saas.turboplm.com">saas.turboplm.com</a>, unsubscribing here does not
+      close it and does not stop the messages the product itself sends — invitations to an
+      organisation, or notifications about work assigned to you. Those come from your
+      account and are managed there. To delete the account and its data, write to
+      <a href="mailto:office@turboplm.com">office@turboplm.com</a> and say so; the
+      <a href="/privacy">privacy notice</a> explains what is held and what happens to it.
+    </p>
+
+    <h2>Who is writing to you</h2>
+    <p>
+      Hai-Soft Inc, trading as TurboPLM, in Ontario, Canada. Registered address available on
+      request. We are contactable at
+      <a href="mailto:office@turboplm.com">office@turboplm.com</a> for this or anything else.
+    </p>
+
+  </div></div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-bot">
+      <span>© 2026 TurboPLM</span>
+      <span><a href="/">Home</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
