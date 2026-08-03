@@ -214,15 +214,12 @@ export default function ItemAccessCard(props: { entityType: AclEntityType; entit
         ) : undefined
       }
     >
-      {access && !access.restricted && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message={`Open ${NOUN[entityType]}`}
-          description="No grants exist, so everyone with a suitable role can see this item. Adding the first grant will restrict it to the people and groups listed here."
-        />
-      )}
+      {/*
+        The "Open" state is already a tag on the card title, and Grant access is already a
+        button in the corner. A three-line banner restating both, on every unrestricted item —
+        which is most items — is wallpaper. It trains people to skip the panel, which is the
+        opposite of what an access control needs.
+      */}
       {access && access.grants.length > 0 && (
         <Table
           size="small"
