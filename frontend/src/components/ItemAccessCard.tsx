@@ -15,7 +15,8 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { LockOutlined, PlusOutlined, UnlockOutlined } from '@ant-design/icons';
+import { LockOutlined, PlusOutlined, UnlockOutlined, WarningOutlined } from '@ant-design/icons';
+import { Hint } from './Hint';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import type {
@@ -239,14 +240,24 @@ export default function ItemAccessCard(props: { entityType: AclEntityType; entit
         confirmLoading={saving}
         destroyOnClose
       >
+        {/*
+          One visible line, detail behind the icon.
+
+          This is NOT a candidate for hiding entirely: adding the first grant hides the item
+          from everyone not on the list, and that is a consequence the reader has to meet
+          before they click, not one they might discover by hovering. So the sentence that
+          changes their decision stays on screen and only the elaboration moves.
+        */}
         {firstGrant && (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message="This is the first grant"
-            description={`Adding it RESTRICTS this ${NOUN[entityType]}: from then on only the people and groups on the list (and administrators) can see it. Everyone else will no longer find it anywhere.`}
-          />
+          <Typography.Paragraph type="warning" style={{ marginBottom: 12 }}>
+            <WarningOutlined /> This is the first grant — adding it will <strong>restrict</strong>{' '}
+            this {NOUN[entityType]}.
+            <Hint title="What restricting does">
+              From then on only the people and groups on this list — and administrators — can
+              see it. Everyone else will no longer find it anywhere: not in search, not in a
+              BOM, not in a where-used. Remove every grant to make it open again.
+            </Hint>
+          </Typography.Paragraph>
         )}
         {modalError && (
           <Alert type="error" showIcon style={{ marginBottom: 12 }} message={modalError} />
