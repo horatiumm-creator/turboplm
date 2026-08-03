@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import type { Key } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
@@ -583,12 +584,7 @@ export default function BuildUnitDetail() {
   return (
     <div>
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="Read-only access — an engineer account is needed to build or change this unit."
-        />
+        <ReadOnlyNotice>An engineer account is needed to build or change this unit.</ReadOnlyNotice>
       )}
 
       <Card style={{ marginBottom: 16 }}>

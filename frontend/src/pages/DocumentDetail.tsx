@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -687,12 +688,7 @@ export default function DocumentDetail() {
           </Space>
         </div>
         {!canEdit && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginTop: 12 }}
-            message="Read-only access — a Viewer can read the vault state but not check documents out."
-          />
+          <ReadOnlyNotice>A Viewer can read the vault state but not check documents out.</ReadOnlyNotice>
         )}
       </Card>
 

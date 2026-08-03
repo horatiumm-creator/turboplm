@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -615,12 +616,7 @@ export default function CatalogImportDetail() {
   return (
     <div>
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          message="Read-only access — you can review this import but not map, validate or commit it."
-          style={{ marginBottom: 16 }}
-        />
+        <ReadOnlyNotice>You can review this import but not map, validate or commit it.</ReadOnlyNotice>
       )}
 
       <Card style={{ marginBottom: 16 }}>

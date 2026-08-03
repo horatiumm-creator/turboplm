@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import type { CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -320,12 +321,7 @@ export default function ServiceRecords() {
       </div>
 
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="Read-only access — a Viewer can read service history but not raise or change records."
-        />
+        <ReadOnlyNotice>A Viewer can read service history but not raise or change records.</ReadOnlyNotice>
       )}
 
       <Space style={{ marginBottom: 16 }} wrap>

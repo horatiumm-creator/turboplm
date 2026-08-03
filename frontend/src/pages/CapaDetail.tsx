@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -338,12 +339,7 @@ export default function CapaDetail() {
           )}
         </Card>
       ) : (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="Read-only access — an engineer account is needed to act on this corrective action."
-        />
+        <ReadOnlyNotice>An engineer account is needed to act on this corrective action.</ReadOnlyNotice>
       )}
 
       {capa.status === 'IN_PROGRESS' && (!capa.rootCause || !capa.correctiveAction) && (

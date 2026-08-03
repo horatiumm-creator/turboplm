@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -234,12 +235,7 @@ export default function CatalogImports() {
       </div>
 
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          message="Read-only access — you can browse catalog imports but not upload or commit them."
-          style={{ marginBottom: 16 }}
-        />
+        <ReadOnlyNotice>You can browse catalog imports but not upload or commit them.</ReadOnlyNotice>
       )}
 
       <Alert

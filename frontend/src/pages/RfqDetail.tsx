@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -481,12 +482,7 @@ export default function RfqDetail() {
   return (
     <div>
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          message="Read-only access — you can browse this RFQ but not change it."
-          style={{ marginBottom: 16 }}
-        />
+        <ReadOnlyNotice>You can browse this RFQ but not change it.</ReadOnlyNotice>
       )}
 
       <Card style={{ marginBottom: 16 }}>

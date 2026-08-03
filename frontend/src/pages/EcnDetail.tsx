@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -825,9 +826,7 @@ export default function EcnDetail() {
           </>
         )}
         {!canEdit && (
-          <Typography.Text type="secondary">
-            Read-only access — an engineer account is needed to act on this change.
-          </Typography.Text>
+          <ReadOnlyNotice>An engineer account is needed to act on this change.</ReadOnlyNotice>
         )}
         {canEdit && (ecn.status === 'RELEASED' || ecn.status === 'CANCELLED') && (
           <Typography.Text type="secondary">

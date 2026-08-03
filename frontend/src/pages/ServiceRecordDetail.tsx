@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -478,12 +479,7 @@ export default function ServiceRecordDetail() {
         </div>
 
         {!canEdit && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginTop: 12 }}
-            message="Read-only access — a Viewer can read this record but not change it or record swaps."
-          />
+          <ReadOnlyNotice>A Viewer can read this record but not change it or record swaps.</ReadOnlyNotice>
         )}
 
         <Descriptions size="middle" column={{ xs: 1, sm: 2, lg: 3 }} style={{ marginTop: 16 }}>

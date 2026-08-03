@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -343,12 +344,7 @@ export default function NcrDetail() {
       )}
 
       {!canEdit && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="Read-only access — an engineer account is needed to act on this nonconformance."
-        />
+        <ReadOnlyNotice>An engineer account is needed to act on this nonconformance.</ReadOnlyNotice>
       )}
 
       <Card title="Corrective action">

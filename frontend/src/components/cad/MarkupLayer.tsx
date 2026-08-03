@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReadOnlyNotice } from '../ReadOnlyNotice';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   Alert,
@@ -668,18 +669,10 @@ export default function MarkupLayer({
   const thread = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {readOnly && (
-        <Alert
-          type="info"
-          showIcon
-          message="Read-only — you can follow this review but not add to it."
-        />
+        <ReadOnlyNotice>You can follow this review but not add to it.</ReadOnlyNotice>
       )}
       {!readOnly && user?.role === 'VIEWER' && (
-        <Alert
-          type="info"
-          showIcon
-          message="Read-only access — a Viewer can read markups but not create, comment or resolve."
-        />
+        <ReadOnlyNotice>A Viewer can read markups but not create, comment or resolve.</ReadOnlyNotice>
       )}
       {visible.length === 0 ? (
         <Empty
