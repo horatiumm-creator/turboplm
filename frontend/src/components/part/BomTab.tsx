@@ -20,7 +20,10 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { ResizableTitle } from '../ResizableTitle';
+import { useColumnWidths } from '../../hooks/useColumnWidths';
 import {
+  ColumnWidthOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
@@ -79,6 +82,30 @@ function collectExpandableKeys(rows: TreeRow[]): Key[] {
   return keys;
 }
 
+/**
+ * Starting column widths, keyed by column `key`.
+ *
+ * The single source of truth: a column listed here gets that width and a drag handle, a
+ * column left out stays flexible and gets neither. Widths live here rather than on the
+ * column definitions so they cannot drift out of step with what the resize hook restores.
+ *
+ * The totals are chosen to fit a laptop window without horizontal scrolling. Once a BOM
+ * scrolls by default the right-hand columns are effectively hidden, and a reader who never
+ * scrolls will not know Notes exists.
+ */
+const BOM_DEFAULT_WIDTHS: Record<string, number> = {
+  part: 300,
+  findNumber: 80,
+  category: 120,
+  rev: 190,
+  quantity: 80,
+  uom: 70,
+  effectivity: 180,
+  refDesignators: 120,
+  notes: 160,
+  actions: 150,
+};
+
 const formatDay = (iso: string) => dayjs(iso).format('YYYY-MM-DD');
 
 function formatEffectivity(from: string | null, to: string | null): string {
@@ -103,6 +130,10 @@ export default function BomTab({
   const [treeRows, setTreeRows] = useState<TreeRow[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<readonly Key[]>([]);
   const [asOf, setAsOf] = useState<Dayjs | null>(null);
+  const { widths, setWidth, reset: resetWidths, customised } = useColumnWidths(
+    'turboplm.bom.columnWidths',
+    BOM_DEFAULT_WIDTHS
+  );
 
   // Add / edit modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -412,7 +443,6 @@ export default function BomTab({
     {
       title: 'Find #',
       key: 'findNumber',
-      width: 80,
       className: 'bom-num',
       align: 'right',
       render: (_, row) => row.node.line.findNumber,
@@ -420,13 +450,11 @@ export default function BomTab({
     {
       title: 'Category',
       key: 'category',
-      width: 120,
       render: (_, row) => <CategoryTag category={row.node.part.category} />,
     },
     {
       title: 'Rev',
       key: 'rev',
-      width: 190,
       render: (_, row) =>
         row.node.revision ? (
           <Space size={4}>
@@ -445,7 +473,6 @@ export default function BomTab({
     {
       title: 'Qty',
       key: 'quantity',
-      width: 80,
       className: 'bom-num',
       align: 'right',
       render: (_, row) => row.node.line.quantity,
@@ -453,13 +480,11 @@ export default function BomTab({
     {
       title: 'UoM',
       key: 'uom',
-      width: 70,
       render: (_, row) => row.node.line.uom,
     },
     {
       title: 'Effectivity',
       key: 'effectivity',
-      width: 180,
       render: (_, row) =>
         formatEffectivity(row.node.line.effectiveFrom, row.node.line.effectiveTo),
     },
@@ -480,7 +505,6 @@ export default function BomTab({
           {
             title: 'Actions',
             key: 'actions',
-            width: 150,
             render: (_, row) =>
               row.depth === 0 ? (
                 <Space size={0}>
@@ -512,6 +536,33 @@ export default function BomTab({
       : []),
   ];
 
+  // Apply the remembered widths and hang a drag handle off each header. Done here rather
+  // than inside each column def so that adding a column to the array above is enough — it
+  // becomes resizable without anyone remembering to opt it in.
+  const resizableColumns: ColumnsType<TreeRow> = columns.map((column) => {
+    const key = String(column.key);
+    const width = widths[key];
+    return {
+      ...column,
+      width,
+      // antd types onHeaderCell as returning plain HTML attributes, so the two extra props
+      // our header component reads have to be cast through. They are passed straight to
+      // ResizableTitle, which is the only header cell this table uses.
+      onHeaderCell: () =>
+        ({
+          width,
+          onResize: (next: number) => setWidth(key, next),
+        }) as React.HTMLAttributes<HTMLElement>,
+    };
+  });
+
+  // The table is told its own total width so it scrolls rather than crushing columns to fit.
+  // Below this figure antd stretches it to the container, so a wide window still fills.
+  const tableWidth = resizableColumns.reduce(
+    (sum, column) => sum + (typeof column.width === 'number' ? column.width : 0),
+    0
+  );
+
   return (
     <div>
       <div
@@ -535,6 +586,17 @@ export default function BomTab({
             value={asOf}
             onChange={(value) => setAsOf(value)}
           />
+          {/*
+            Only once the widths have actually been changed. A permanent "reset" for a state
+            nobody has entered is clutter, and it invites the reader to wonder what is broken.
+          */}
+          {customised && (
+            <Tooltip title="Restore the default column widths">
+              <Button icon={<ColumnWidthOutlined />} onClick={resetWidths}>
+                Reset columns
+              </Button>
+            </Tooltip>
+          )}
           <Button icon={<DownloadOutlined />} href={api.bomExportUrl(revision.id)}>
             Export CSV
           </Button>
@@ -555,10 +617,19 @@ export default function BomTab({
         size="middle"
         className="bom-tree"
         rowKey="key"
-        columns={columns}
+        columns={resizableColumns}
         dataSource={treeRows}
         loading={loading}
         pagination={false}
+        components={{ header: { cell: ResizableTitle } }}
+        scroll={{ x: tableWidth }}
+        /*
+          Wider than antd's default 15px. At 15 the levels of a deep assembly sit almost on
+          top of one another and the shape of the tree — the thing this view exists to show —
+          has to be inferred from the guide lines rather than seen. 26 separates them clearly
+          while still fitting five or six levels in the Part column.
+        */
+        indentSize={26}
         expandable={{
           expandedRowKeys: expandedKeys as Key[],
           onExpandedRowsChange: (keys) => setExpandedKeys(keys),

@@ -50,7 +50,10 @@ body,
 }
 
 /* Depth 0 has no parent to connect to. */
-.bom-tree .ant-table-row-indent-level-0::before {
+/* antd names these `indent-level-N`, NOT `ant-table-row-indent-level-N`. Getting it wrong
+   is silent: the rule simply never matches and every top-level row draws a guide line at
+   zero indent — a stray hairline down the left of the Part column with no tree to mark. */
+.bom-tree .indent-level-0::before {
   display: none;
 }
 
@@ -61,4 +64,52 @@ body,
 .bom-tree .bom-pn {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
+}
+
+/* -------------------------------------------------------------------------
+   Resizable table headers (see components/ResizableTitle.tsx)
+   ------------------------------------------------------------------------- */
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Inside the cell, not straddling its edge. Ellipsis columns carry `overflow: hidden`
+     on the header itself, so a handle hung over the boundary is clipped away on exactly
+     the columns most likely to need widening. */
+  right: 0;
+  width: 8px;
+  cursor: col-resize;
+  /* Wider than the line it appears to grab. A 1px target is a test of aim, not a control;
+     8px is grabbable without hunting for it and still narrow enough not to swallow clicks
+     meant for the column-sort header beside it. */
+  touch-action: none;
+  user-select: none;
+  z-index: 1;
+}
+
+/* The handle is invisible until pointed at — a permanent grip line on every header would
+   add nine vertical rules to a table that already has borders. */
+.col-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ant-color-primary, #1677ff);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.col-resize-handle:hover::after,
+.col-resize-handle:active::after {
+  opacity: 1;
+}
+
+/* antd draws its own faint separator between headers via `th::before`. Under the pointer it
+   sits directly behind the handle's indicator and muddies it. */
+.ant-table-thead th:has(.col-resize-handle:hover)::before {
+  opacity: 0;
 }
