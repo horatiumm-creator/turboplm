@@ -385,9 +385,7 @@ export default function RequirementsList() {
         dataSource={matrix?.rows ?? []}
         loading={matrixLoading}
         pagination={false}
-        onRow={(row) =>
-          row.parts.length === 0 ? { style: { background: '#fff1f0' } } : {}
-        }
+        onRow={(row) => (row.parts.length === 0 ? { className: 'req-uncovered' } : {})}
       />
     </div>
   );

@@ -21,7 +21,8 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ResizableTitle } from '../ResizableTitle';
-import { useColumnWidths } from '../../hooks/useColumnWidths';
+import { useTableColumns } from '../../hooks/useTableColumns';
+import { ColumnPicker } from '../ColumnPicker';
 import {
   ColumnWidthOutlined,
   DeleteOutlined,
@@ -130,10 +131,14 @@ export default function BomTab({
   const [treeRows, setTreeRows] = useState<TreeRow[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<readonly Key[]>([]);
   const [asOf, setAsOf] = useState<Dayjs | null>(null);
-  const { widths, setWidth, reset: resetWidths, customised } = useColumnWidths(
-    'turboplm.bom.columnWidths',
-    BOM_DEFAULT_WIDTHS
-  );
+  const {
+    widths,
+    hidden,
+    setWidth,
+    setVisible,
+    reset: resetColumns,
+    customised,
+  } = useTableColumns('turboplm.bom.columnWidths', BOM_DEFAULT_WIDTHS);
 
   // Add / edit modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -536,25 +541,39 @@ export default function BomTab({
       : []),
   ];
 
+  // The picker list is derived from the column definitions rather than written out beside
+  // them, so a column added above appears in the picker automatically and cannot fall out of
+  // step with what the table actually renders.
+  const pickerItems = columns.map((column) => ({
+    key: String(column.key),
+    label: typeof column.title === 'string' ? column.title : String(column.key),
+    // Part carries the row's identity and the tree expander. Hide it and the BOM becomes a
+    // list of quantities belonging to nothing, with no way to collapse a branch.
+    locked: column.key === 'part',
+  }));
+
   // Apply the remembered widths and hang a drag handle off each header. Done here rather
   // than inside each column def so that adding a column to the array above is enough — it
-  // becomes resizable without anyone remembering to opt it in.
-  const resizableColumns: ColumnsType<TreeRow> = columns.map((column) => {
-    const key = String(column.key);
-    const width = widths[key];
-    return {
-      ...column,
-      width,
-      // antd types onHeaderCell as returning plain HTML attributes, so the two extra props
-      // our header component reads have to be cast through. They are passed straight to
-      // ResizableTitle, which is the only header cell this table uses.
-      onHeaderCell: () =>
-        ({
-          width,
-          onResize: (next: number) => setWidth(key, next),
-        }) as React.HTMLAttributes<HTMLElement>,
-    };
-  });
+  // becomes resizable and hideable without anyone remembering to opt it in.
+  const resizableColumns: ColumnsType<TreeRow> = columns
+    .filter((column) => column.key === 'part' || !hidden.has(String(column.key)))
+    .map((column) => {
+
+      const key = String(column.key);
+      const width = widths[key];
+      return {
+        ...column,
+        width,
+        // antd types onHeaderCell as returning plain HTML attributes, so the two extra props
+        // our header component reads have to be cast through. They are passed straight to
+        // ResizableTitle, which is the only header cell this table uses.
+        onHeaderCell: () =>
+          ({
+            width,
+            onResize: (next: number) => setWidth(key, next),
+          }) as React.HTMLAttributes<HTMLElement>,
+      };
+    });
 
   // The table is told its own total width so it scrolls rather than crushing columns to fit.
   // Below this figure antd stretches it to the container, so a wide window still fills.
@@ -590,9 +609,10 @@ export default function BomTab({
             Only once the widths have actually been changed. A permanent "reset" for a state
             nobody has entered is clutter, and it invites the reader to wonder what is broken.
           */}
+          <ColumnPicker items={pickerItems} hidden={hidden} onToggle={setVisible} />
           {customised && (
-            <Tooltip title="Restore the default column widths">
-              <Button icon={<ColumnWidthOutlined />} onClick={resetWidths}>
+            <Tooltip title="Restore the default column widths and show every column">
+              <Button icon={<ColumnWidthOutlined />} onClick={resetColumns}>
                 Reset columns
               </Button>
             </Tooltip>

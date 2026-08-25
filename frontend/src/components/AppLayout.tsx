@@ -35,6 +35,7 @@ import * as api from '../api/client';
 import type { NotificationItem, SearchHit, SearchResults } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { formatDate } from './meta';
+import { ThemeToggle } from './ThemeToggle';
 
 const { Sider, Header, Content } = Layout;
 
@@ -481,6 +482,7 @@ export default function AppLayout() {
                 allowClear
               />
             </AutoComplete>
+            <ThemeToggle />
             <Dropdown
               trigger={['click']}
               open={notifOpen}

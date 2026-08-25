@@ -1,10 +1,47 @@
+/* ---------------------------------------------------------------------------
+   Theme
+   ---------------------------------------------------------------------------
+   antd themes itself through its own token system, which plain CSS cannot see. These
+   variables are the bridge: `data-theme` is written onto <html> by ThemeContext (and, to
+   beat the first paint, by an inline script in index.html), and everything below reads
+   through it.
+
+   Light is the bare `:root` block so that a browser which never gets the attribute — script
+   blocked, or an older cached index.html — still renders a coherent page rather than an
+   unstyled one.
+
+   The dark tints are not the light ones darkened. A pale wash that reads as "added" on white
+   becomes a muddy grey at low luminance, so each one is re-picked as a low-luminance colour
+   that keeps its hue against a dark surface while leaving antd's light body text legible on
+   top of it.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --app-bg: #f2f4f7;
+  --tint-added: #f6ffed;
+  --tint-removed: #fff1f0;
+  --tint-changed: #fffbe6;
+  --panel-accent: #f5f8ff;
+  --bom-guide: rgba(140, 140, 140, 0.28);
+}
+
+[data-theme='dark'] {
+  --app-bg: #16181c;
+  --tint-added: #16261a;
+  --tint-removed: #2b1618;
+  --tint-changed: #2a2413;
+  --panel-accent: #1a2130;
+  /* Lighter and slightly more opaque than the light-mode guide: a hairline that reads as a
+     faint pencil line on white disappears entirely against a dark table. */
+  --bom-guide: rgba(200, 205, 215, 0.22);
+}
 html,
 body,
 #root {
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  background: #f2f4f7;
+  background: var(--app-bg);
 }
 
 * {
@@ -13,18 +50,28 @@ body,
 
 /* BOM compare row tints */
 .compare-row-added > td {
-  background: #f6ffed !important;
+  background: var(--tint-added) !important;
 }
 .compare-row-removed > td {
-  background: #fff1f0 !important;
+  background: var(--tint-removed) !important;
 }
 .compare-row-changed > td {
-  background: #fffbe6 !important;
+  background: var(--tint-changed) !important;
 }
 
 /* Lowest quote on an RFQ line */
 .rfq-quote-lowest > td {
-  background: #f6ffed !important;
+  background: var(--tint-added) !important;
+}
+
+/* Requirement with no part covering it */
+.req-uncovered > td {
+  background: var(--tint-removed) !important;
+}
+
+/* Inset explanatory panels (ECN detail) */
+.panel-accent {
+  background: var(--panel-accent);
 }
 
 /* ---------------------------------------------------------------------------

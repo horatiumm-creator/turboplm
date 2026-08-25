@@ -8,6 +8,29 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%231e6fd9'/%3E%3Ctext x='50' y='68' font-size='52' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E"
     />
     <title>TurboPLM</title>
+    <!--
+      Resolve the theme before the first paint.
+
+      React sets data-theme in an effect, which runs after the browser has already painted —
+      so a dark-mode user gets a full-screen flash of white on every page load and every hard
+      refresh. This runs synchronously in <head>, before <body> exists, and is the only way to
+      get the background right on the very first frame. It duplicates a few lines of
+      ThemeContext deliberately; the alternative is the flash.
+    -->
+    <script>
+      (function () {
+        try {
+          var m = localStorage.getItem('turboplm.theme');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', m);
+          document.documentElement.style.colorScheme = m;
+        } catch (e) {
+          /* storage denied — fall through to light, which is what the CSS defaults to */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

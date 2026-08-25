@@ -1,23 +1,21 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { App as AntdApp, ConfigProvider } from 'antd';
+import { App as AntdApp } from 'antd';
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
+import { ThemeProvider } from './theme/ThemeContext';
 import './styles.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider
-      theme={{
-        token: {
-          colorPrimary: '#1e6fd9',
-          borderRadius: 6,
-          fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-        },
-      }}
-    >
+    {/*
+      ThemeProvider owns the ConfigProvider: the algorithm and the brand token both depend on
+      the resolved light/dark mode, so they have to be decided inside something that can react
+      to it. Outside AntdApp so that message and modal portals are themed too — they render
+      through a context that is captured here.
+    */}
+    <ThemeProvider>
       <AntdApp>
         <BrowserRouter>
           <AuthProvider>
@@ -25,6 +23,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </AuthProvider>
         </BrowserRouter>
       </AntdApp>
-    </ConfigProvider>
+    </ThemeProvider>
   </React.StrictMode>
 );

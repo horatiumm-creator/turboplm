@@ -864,10 +864,10 @@ export default function EcnDetail() {
           />
           {myTask && (
             <div
+              className="panel-accent"
               style={{
                 marginTop: 16,
                 padding: 16,
-                background: '#f5f8ff',
                 borderRadius: 8,
               }}
             >
@@ -978,10 +978,10 @@ export default function EcnDetail() {
             if (!mine) return null;
             return (
               <div
+                className="panel-accent"
                 style={{
                   marginTop: 16,
                   padding: 16,
-                  background: '#f5f8ff',
                   borderRadius: 8,
                 }}
               >
