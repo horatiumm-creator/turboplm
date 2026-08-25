@@ -19,6 +19,8 @@ import {
   REDACTED,
   visibleIds,
 } from '../lib/acl';
+import type { Ap242Node, Ap242Usage } from '../lib/ap242';
+import { writeAp242 } from '../lib/ap242';
 
 const router = Router();
 router.use(requireAuth);
@@ -542,6 +544,267 @@ router.get(
       `attachment; filename="${safePartNumber}_rev${revision.revision}_bom.csv"`
     );
     res.send(rows.join('\r\n') + '\r\n');
+  })
+);
+
+// ---------------------------------------------------------------------------
+// GET /revisions/:id/export/step — AP242 product structure as a Part 21 file
+//
+// The file format, the entity graph, the quantity decision and the determinism rules all
+// live in lib/ap242.ts, which is pure. What lives here is what must live here: reading
+// the structure out of the database, resolving each child's revision by the SAME rule the
+// BOM read uses, and applying item-level access control. An export endpoint that dumps
+// restricted items is the same leak as a list endpoint that does.
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything the exporter needs about a child, and nothing else.
+ *
+ * Deliberately narrower than `lineInclude`: alternates are not exported at all. AP242
+ * carries substitutes through a different subset (`alternate_product_relationship`), and
+ * emitting an alternate as if it were a component would overstate the assembly.
+ */
+const stepLineInclude = {
+  childPart: {
+    select: {
+      id: true,
+      partNumber: true,
+      name: true,
+      description: true,
+      category: true,
+      updatedAt: true,
+      revisions: {
+        select: { id: true, revision: true, lifecycle: true, changeNote: true, createdAt: true },
+      },
+    },
+  },
+} as const;
+
+interface StepWalk {
+  /** Keyed by partId. Insertion order IS walk order, which fixes the emission order. */
+  nodes: Map<number, Ap242Node>;
+  usages: Ap242Usage[];
+  /**
+   * Revisions whose lines have already been read.
+   *
+   * Two jobs. It makes a shared subassembly appear once in the entity graph rather than
+   * once per parent — the export is a graph, not an expanded tree. And it is what
+   * terminates the walk: the codebase prevents BOM cycles on write, but an exporter that
+   * would hang on one is an exporter that hangs on a corrupted database, so the walk is
+   * bounded by the number of distinct revisions reachable no matter what the data says.
+   */
+  expanded: Set<number>;
+  notes: string[];
+  /** Most recent change among everything exported — the file's data-derived time stamp. */
+  changedAt: number;
+}
+
+function noteChange(walk: StepWalk, ...times: Date[]): void {
+  for (const time of times) walk.changedAt = Math.max(walk.changedAt, time.getTime());
+}
+
+function addVisibleStepNode(
+  walk: StepWalk,
+  part: {
+    id: number;
+    partNumber: string;
+    name: string;
+    description: string | null;
+    category: PartCategory;
+  },
+  revision: { revision: string; lifecycle: Lifecycle; changeNote: string | null }
+): void {
+  if (walk.nodes.has(part.id)) return;
+  walk.nodes.set(part.id, {
+    key: part.id,
+    walkOrder: walk.nodes.size,
+    restricted: false,
+    partNumber: part.partNumber,
+    name: part.name,
+    description: part.description,
+    category: part.category,
+    revision: revision.revision,
+    changeNote: revision.changeNote,
+    lifecycle: revision.lifecycle,
+  });
+}
+
+/**
+ * Rule X4 — a position whose child the caller may not read keeps its row so the parent's
+ * structure still adds up, and loses the child's identity entirely. Note what is NOT
+ * passed: nothing about the part reaches the writer, so the redaction cannot be undone by
+ * a later change to the writer.
+ */
+function addRestrictedStepNode(walk: StepWalk, partId: number): void {
+  if (walk.nodes.has(partId)) return;
+  walk.nodes.set(partId, { key: partId, walkOrder: walk.nodes.size, restricted: true });
+}
+
+function addStepUsage(walk: StepWalk, parentPartId: number, line: LineForStep): void {
+  walk.usages.push({
+    parentKey: parentPartId,
+    childKey: line.childPartId,
+    findNumber: line.findNumber,
+    quantity: line.quantity,
+    uom: line.uom,
+    refDesignators: line.refDesignators,
+    notes: line.notes,
+  });
+}
+
+type LineForStep = Prisma.BomLineGetPayload<{ include: typeof stepLineInclude }>;
+
+/**
+ * Read one assembly level and recurse.
+ *
+ * Find-number order, which the unique index on (parentRevisionId, findNumber) makes
+ * total, so the traversal — and therefore every entity id in the output — is
+ * reproducible.
+ *
+ * Recursion rather than an explicit stack, mirroring `buildTreeLevel`. There is no depth
+ * cap: unlike the tree view, which caps at MAX_TREE_DEPTH to bound a response that grows
+ * exponentially with depth, this walk visits each revision once, so its cost is linear in
+ * the structure and truncating it would silently ship an incomplete assembly.
+ */
+async function expandStepLevel(
+  parentPartId: number,
+  parentPartNumber: string,
+  parentRevisionId: number,
+  ancestorPartIds: ReadonlySet<number>,
+  walk: StepWalk,
+  user: AclUser
+): Promise<void> {
+  if (walk.expanded.has(parentRevisionId)) return;
+  walk.expanded.add(parentRevisionId);
+
+  const lines = await prisma.bomLine.findMany({
+    where: { parentRevisionId },
+    orderBy: { findNumber: 'asc' },
+    include: stepLineInclude,
+  });
+  const visible = await visibleIds(
+    'PART',
+    lines.map((line) => line.childPartId),
+    user
+  );
+
+  for (const line of lines) {
+    const child = line.childPart;
+    if (!visible.has(child.id)) {
+      addRestrictedStepNode(walk, child.id);
+      addStepUsage(walk, parentPartId, line);
+      continue;
+    }
+
+    // The resolved-revision rule is not re-derived here: `resolveDisplayRevision` is the
+    // same helper the flat BOM read and the tree walk use — latest RELEASED, and failing
+    // that the latest revision of any state. An exporter that quietly picked a different
+    // revision than the screen shows would be the worst kind of wrong.
+    const resolved = resolveDisplayRevision(child.revisions);
+    if (!resolved) {
+      // A part with no revision at all has nothing to hang a PRODUCT_DEFINITION on, and
+      // inventing one would put a revision in the file that does not exist. Dropping the
+      // position is the lesser evil, but it is not allowed to be silent.
+      walk.notes.push(
+        `Omitted find number ${line.findNumber} of ${parentPartNumber}: ` +
+          `${child.partNumber} has no revision, so no product definition could be written.`
+      );
+      continue;
+    }
+
+    addVisibleStepNode(walk, child, resolved);
+    noteChange(walk, child.updatedAt, resolved.createdAt);
+    addStepUsage(walk, parentPartId, line);
+
+    if (ancestorPartIds.has(child.id)) {
+      walk.notes.push(
+        `${child.partNumber} appears within its own assembly. The position is exported; ` +
+          'the branch is not expanded again.'
+      );
+      continue;
+    }
+    const branch = new Set(ancestorPartIds);
+    branch.add(child.id);
+    await expandStepLevel(child.id, child.partNumber, resolved.id, branch, walk, user);
+  }
+}
+
+/** Content-Disposition and the FILE_NAME entity both take this. */
+function stepFileName(partNumber: string, revision: string): string {
+  const safe = (value: string) => value.replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${safe(partNumber)}_rev${safe(revision)}.stp`;
+}
+
+router.get(
+  '/revisions/:id/export/step',
+  asyncHandler(async (req, res) => {
+    const revisionId = idParam(req.params.id);
+    const user = aclUser(req);
+    // The access decision belongs to the shared helper, so this route cannot drift from
+    // the rest of the revision routes: unreadable and absent both answer 404 here too.
+    await readableRevisionOrThrow(revisionId, user);
+
+    // A second read for the fields the exporter needs, carrying the part filter again
+    // rather than trusting the line above — the cost is one indexed lookup and it means
+    // no future edit can leave this query unfiltered.
+    const root = await prisma.partRevision.findFirst({
+      where: { id: revisionId, part: partAcl(user) },
+      select: {
+        id: true,
+        revision: true,
+        lifecycle: true,
+        changeNote: true,
+        createdAt: true,
+        part: {
+          select: {
+            id: true,
+            partNumber: true,
+            name: true,
+            description: true,
+            category: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+    if (!root) throw new HttpError(404, 'Revision not found');
+
+    const walk: StepWalk = {
+      nodes: new Map(),
+      usages: [],
+      expanded: new Set(),
+      notes: [],
+      changedAt: 0,
+    };
+    // The root is exported at the revision that was asked for, released or not; only its
+    // components go through the resolved-revision rule.
+    addVisibleStepNode(walk, root.part, root);
+    noteChange(walk, root.part.updatedAt, root.createdAt);
+    await expandStepLevel(
+      root.part.id,
+      root.part.partNumber,
+      root.id,
+      new Set([root.part.id]),
+      walk,
+      user
+    );
+
+    const fileName = stepFileName(root.part.partNumber, root.revision);
+    const file = writeAp242({
+      fileName,
+      timestamp: new Date(walk.changedAt),
+      nodes: [...walk.nodes.values()],
+      usages: walk.usages,
+      notes: walk.notes,
+    });
+
+    // `application/step` is what Teamcenter, Windchill and NX register for a .stp file.
+    // Express appends charset=utf-8 to it; harmless, because lib/ap242.ts escapes every
+    // non-ASCII character, so the body reads identically under any ASCII-compatible
+    // encoding the receiving system happens to assume.
+    res.setHeader('Content-Type', 'application/step');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(file);
   })
 );
 

@@ -44,6 +44,7 @@ import type {
 } from '../../api/types';
 import { CategoryTag, LifecycleTag } from '../meta';
 import CadImportModal from './CadImportModal';
+import { Hint } from '../Hint';
 
 interface TreeRow {
   key: string;
@@ -620,6 +621,24 @@ export default function BomTab({
           <Button icon={<DownloadOutlined />} href={api.bomExportUrl(revision.id)}>
             Export CSV
           </Button>
+          {/*
+            "structure" is in the label, not only in the hint. STEP is the format people
+            associate with CAD geometry, so a button reading "Export STEP" beside a BOM would be
+            read as "download the model" — and the download would arrive with no shapes in it.
+            One word in the label prevents that; the hint below explains the rest to whoever
+            wants it.
+          */}
+          <span>
+            <Button icon={<DownloadOutlined />} href={api.revisionStepExportUrl(revision.id)}>
+              Export STEP structure
+            </Button>
+            <Hint title="What the STEP file contains">
+              The product structure of this revision as STEP: the assembly tree, quantities and
+              part identification. It carries no geometry — opening it in a CAD system gives you
+              an empty assembly, not a model. Shapes live in the CAD files attached on the
+              Documents tab. Use this to hand the breakdown to a system that reads STEP.
+            </Hint>
+          </span>
           {editable && (
             <Button icon={<PartitionOutlined />} onClick={() => setCadOpen(true)}>
               Import from CAD

@@ -109,6 +109,7 @@ import type {
   ProjectDetail,
   ProjectStatus,
   ProjectSummary,
+  ReqifImportResult,
   RequirementDetail,
   RequirementMatrix,
   RequirementStatus,
@@ -696,6 +697,17 @@ export const getMyWork = () => request<MyWork>('/my-work');
 /** Direct download URL for the multi-level BOM CSV of a revision. */
 export const bomExportUrl = (revisionId: number) => `/api/revisions/${revisionId}/bom/export.csv`;
 
+/**
+ * Direct download URL for the STEP (.stp) product structure of a revision.
+ *
+ * Structure, not shapes. STEP is best known as a geometry format, so the name sets an
+ * expectation this endpoint cannot meet: a PLM database holds an assembly tree, quantities and
+ * part identification, and none of that is a solid model. Anything in the UI that offers this
+ * has to say so at the point of the click — see the label and hint on the eBOM tab.
+ */
+export const revisionStepExportUrl = (revisionId: number) =>
+  `/api/revisions/${revisionId}/export/step`;
+
 // ---- requirements & traceability ----
 export interface ListRequirementsParams {
   search?: string;
@@ -747,6 +759,30 @@ export const removeRequirementLink = (linkId: number) =>
 export const getRequirementMatrix = () => request<RequirementMatrix>('/requirements/matrix');
 export const getPartRequirements = (partId: number) =>
   request<RequirementSummary[]>(`/parts/${partId}/requirements`);
+
+// ---- requirements: ReqIF interchange ----
+
+/**
+ * Direct download URL for every requirement the caller may read, as ReqIF.
+ *
+ * A plain string rather than a function because the endpoint takes no arguments — and that is
+ * itself worth knowing at the call site: the export is not scoped by whatever search or filter
+ * the list happens to be showing.
+ */
+export const requirementsReqifExportUrl = '/api/requirements/export/reqif';
+
+/**
+ * Import a ReqIF file. ADMIN and ENGINEER only; a VIEWER is refused with 403.
+ *
+ * Read the `unknownAttributesDropped` count in the result and show it. Attributes the file
+ * carries that this data model has nowhere to put are dropped, and the count is the only
+ * trace of that; see ReqifImportResult.
+ */
+export const importRequirementsReqif = (file: File) => {
+  const form = new FormData();
+  form.set('file', file);
+  return requestForm<ReqifImportResult>('/requirements/import/reqif', form);
+};
 
 // ---- workflow engine ----
 export const listWorkflowTemplates = () =>

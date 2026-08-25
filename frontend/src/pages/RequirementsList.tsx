@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Form,
   Input,
   Modal,
@@ -16,14 +17,16 @@ import {
   Table,
   Tabs,
   Typography,
+  Upload,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import type {
   EcnPriority,
+  ReqifImportResult,
   RequirementMatrix,
   RequirementMatrixRow,
   RequirementStatus,
@@ -39,6 +42,8 @@ import {
   ReqTypeTag,
   formatDate,
 } from '../components/meta';
+import { Hint } from '../components/Hint';
+import { ReadOnlyNotice } from '../components/ReadOnlyNotice';
 
 interface NewRequirementValues {
   title: string;
@@ -87,6 +92,16 @@ export default function RequirementsList() {
   const [parentOptions, setParentOptions] = useState<ReqOption[]>([]);
   const [parentLoading, setParentLoading] = useState(false);
   const parentTimer = useRef<number | undefined>(undefined);
+
+  // ---- ReqIF import modal state ----
+  // The result is held rather than announced in a toast: `unknownAttributesDropped` is a number the
+  // reader may need to act on (go back to the source tool, or ask for those fields to be added
+  // here), and a toast that disappears after three seconds is not where you put that.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ReqifImportResult | null>(null);
 
   const requestRef = useRef(0);
   const load = useCallback(async () => {
@@ -191,6 +206,31 @@ export default function RequirementsList() {
       setModalError(err instanceof ApiError ? err.message : 'Something went wrong');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openImport = () => {
+    setImportFile(null);
+    setImportError(null);
+    setImportResult(null);
+    setImportOpen(true);
+  };
+
+  const handleImport = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const result = await api.importRequirementsReqif(importFile);
+      setImportResult(result);
+      // Refresh behind the modal, so closing it does not reveal a stale table. The matrix is
+      // only refetched when it is the visible tab; the tab switch refetches it anyway.
+      await load();
+      if (activeTab === 'matrix') await loadMatrix();
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -403,12 +443,41 @@ export default function RequirementsList() {
         <Typography.Title level={3} style={{ margin: 0 }}>
           Requirements
         </Typography.Title>
-        {!isViewer && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            New requirement
-          </Button>
-        )}
+        <Space size={8}>
+          <span>
+            <Button icon={<DownloadOutlined />} href={api.requirementsReqifExportUrl}>
+              Export ReqIF
+            </Button>
+            {/*
+              The scope of the export is not what the screen implies. Someone who has narrowed
+              the list to four safety requirements and then clicks Export gets the whole set,
+              and would have no way to tell from the file that the filters were ignored.
+            */}
+            <Hint title="What gets exported">
+              Every requirement you have access to, as a ReqIF file for exchange with other
+              requirements tools. The search and filters above do not narrow it.
+            </Hint>
+          </span>
+          {/* Import writes; a Viewer does not get the button, as everywhere else in the app. */}
+          {!isViewer && (
+            <Button icon={<UploadOutlined />} onClick={openImport}>
+              Import ReqIF
+            </Button>
+          )}
+          {!isViewer && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              New requirement
+            </Button>
+          )}
+        </Space>
       </div>
+
+      {isViewer && (
+        <ReadOnlyNotice>
+          You can read requirements and export them, but not create or import them. An engineer or
+          administrator account can.
+        </ReadOnlyNotice>
+      )}
 
       <Tabs
         activeKey={activeTab}
@@ -482,6 +551,106 @@ export default function RequirementsList() {
             <Input.TextArea rows={2} placeholder="How is this requirement verified? (optional)" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Import ReqIF"
+        open={importOpen}
+        onCancel={() => setImportOpen(false)}
+        // Custom footer because this modal has two states. Before the import it needs a Cancel
+        // and a submit that is disabled until a file is chosen; after it, the result is the
+        // point of the dialog and there is nothing left to confirm — only to read and dismiss.
+        footer={
+          importResult ? (
+            <Button type="primary" onClick={() => setImportOpen(false)}>
+              Close
+            </Button>
+          ) : (
+            <Space>
+              <Button onClick={() => setImportOpen(false)}>Cancel</Button>
+              <Button
+                type="primary"
+                loading={importing}
+                disabled={!importFile}
+                onClick={() => void handleImport()}
+              >
+                Import
+              </Button>
+            </Space>
+          )
+        }
+      >
+        {importError && (
+          <Alert type="error" showIcon message={importError} style={{ marginBottom: 16 }} />
+        )}
+
+        {importResult ? (
+          <>
+            <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="Created">{importResult.created}</Descriptions.Item>
+              <Descriptions.Item label="Updated">{importResult.updated}</Descriptions.Item>
+              <Descriptions.Item label="Skipped">{importResult.skipped}</Descriptions.Item>
+              <Descriptions.Item label="Attributes dropped">
+                {importResult.unknownAttributesDropped}
+              </Descriptions.Item>
+              {/*
+                Shown for the same reason as the attribute count, and it is the easier one to
+                miss: every requirement in the file can import cleanly while every link in it is
+                discarded, which reads as complete success unless the number is on screen.
+              */}
+              <Descriptions.Item label="Links ignored">
+                {importResult.linksIgnored}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {/*
+              Visible, not behind a hint. Dropped attributes are data the customer had before
+              the import and does not have after it, and the only person who can decide whether
+              that matters is the one reading this — after which this number is gone for good.
+              A count of zero is worth stating too: it is the difference between "nothing was
+              lost" and "nobody checked".
+            */}
+            {importResult.unknownAttributesDropped > 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                message={`${importResult.unknownAttributesDropped} attribute value${
+                  importResult.unknownAttributesDropped === 1 ? ' was' : 's were'
+                } discarded`}
+                description="The file carries attributes this system has no field for, so their values were not stored. The requirements themselves imported; those extra fields did not come with them. Keep the original file if you need them."
+              />
+            ) : (
+              <Typography.Text type="secondary">
+                Every attribute in the file had somewhere to go — nothing was discarded.
+              </Typography.Text>
+            )}
+          </>
+        ) : (
+          <>
+            <Typography.Paragraph type="secondary">
+              One ReqIF file exported from your requirements tool. Requirements it matches to
+              existing ones are updated and the rest are created; you will see the counts here
+              when it finishes.
+            </Typography.Paragraph>
+            <Space size={12} wrap>
+              <Upload
+                accept=".reqif,.xml"
+                maxCount={1}
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  setImportFile(file);
+                  setImportError(null);
+                  return false; // the POST is ours; antd must not auto-upload
+                }}
+              >
+                <Button icon={<UploadOutlined />}>
+                  {importFile ? 'Choose a different file' : 'Choose file'}
+                </Button>
+              </Upload>
+              {importFile && <Typography.Text>{importFile.name}</Typography.Text>}
+            </Space>
+          </>
+        )}
       </Modal>
     </div>
   );

@@ -438,6 +438,18 @@ Multi-level walk identical to the tree endpoint (resolved revisions, depth cap, 
 no asOf filter). Columns: Level,Find,Part Number,Part Name,Category,Revision,Lifecycle,
 Quantity,UoM,RefDes,Notes,Effective From,Effective To. Proper CSV quoting (RFC 4180).
 
+GET /revisions/:id/export/step → `application/step` attachment
+`<partNumber>_rev<label>.stp`. ISO 10303-21 (Part 21) AP242 physical file carrying the
+**product structure only** — the assembly tree, quantities and part identification. It holds
+no geometry: opened in a CAD system it yields an empty assembly, not a model. Same walk,
+resolved revisions, depth cap and cycle stop as the CSV export, and the same item-level
+filter and redaction (rules X4/X5) — a part the caller may not read becomes a
+`RESTRICTED-<walkOrder>` node holding its position, never a silently dropped line.
+One `PRODUCT_RELATED_PRODUCT_CATEGORY('part', ...)` instance per file carrying every product
+(PDM Schema Usage Guide r4.3 §2.1.1), with the TurboPLM category hung beneath it via
+`PRODUCT_CATEGORY_RELATIONSHIP`. Strings escaped per Part 21: apostrophe and backslash
+doubled, non-ASCII via `\X2\` (4 hex per BMP code point) or `\X4\` (8 hex above U+FFFF).
+
 ### Frontend
 
 - `pages/MyWork.tsx` at /my-work, sidebar "My Work" (InboxOutlined) first after Dashboard.
@@ -470,6 +482,15 @@ paged like /parts) · POST /requirements · GET /requirements/matrix (register B
 /requirements/:id) · GET /requirements/:id · PATCH · POST /requirements/:id/transition
 {action} · DELETE · POST /requirements/:id/links · DELETE /requirement-links/:id ·
 GET /parts/:id/requirements (RequirementSummary[] satisfied by the part, reqNumber asc).
+
+ReqIF 1.2 (OMG, namespace `http://www.omg.org/spec/ReqIF/20110401/reqif.xsd`):
+GET /requirements/export/reqif → `application/xml` attachment; every requirement in scope,
+reqNumber asc, hierarchy expressed by SPEC-HIERARCHY nesting rather than a parent attribute.
+Link targets the caller may not read are redacted, not omitted (rules X4/X5).
+POST /requirements/import/reqif (multipart) — ADMIN and ENGINEER only, VIEWER 403. Parses a
+ReqIF document back into requirements; attributes this data model has nowhere to put are
+dropped and counted in `unknownAttributesDropped`, which is the only trace of that and so is
+reported to the caller rather than swallowed.
 DTOs pinned in types.ts (linkedParts/linkedDocuments = counts of respective link kinds;
 childCount; RequirementDetail.children as summaries ordered reqNumber asc).
 

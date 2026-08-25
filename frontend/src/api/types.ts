@@ -739,6 +739,35 @@ export interface RequirementMatrix {
   rows: RequirementMatrixRow[];
 }
 
+/**
+ * The outcome of a ReqIF import.
+ *
+ * `unknownAttributesDropped` is the one that matters and the one a caller is most likely to drop on
+ * the floor. A ReqIF file from DOORS or Polarion carries whatever attributes that tool's
+ * template defined — verification method, allocation, obligation, a dozen customer-specific
+ * columns — and this data model has a home for only a few of them. The rest cannot be stored,
+ * so they are counted and discarded. Showing `created` and `updated` while quietly swallowing
+ * that count would tell someone their requirements imported cleanly when a third of each one's
+ * content did not arrive, which they would discover much later and much more expensively.
+ * Every caller must surface it.
+ */
+export interface ReqifImportResult {
+  created: number;
+  updated: number;
+  /** Requirements in the file that the server chose not to write. */
+  skipped: number;
+  unknownAttributesDropped: number;
+  /**
+   * Links in the file that pointed at parts or documents and could not be applied.
+   *
+   * Surfaced for the same reason as the attribute count, and it is the easier one to forget
+   * because the requirements themselves all arrived: a file whose every link was dropped would
+   * otherwise report total success. A silent drop is discovered weeks later, by which time
+   * nobody connects it to the import.
+   */
+  linksIgnored: number;
+}
+
 // ---- workflow engine ----
 
 export type WorkflowRule = 'ANY' | 'ALL';

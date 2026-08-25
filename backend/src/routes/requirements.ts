@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Request, Router } from 'express';
 import {
   EcnPriority,
@@ -11,6 +12,14 @@ import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import { escapeLike, withNumberLock } from '../lib/plm';
 import { AclUser, aclFilter, REDACTED, visibleIds } from '../lib/acl';
+import { absoluteStoragePath, removeStoredFile, uploadSingle } from '../middleware/upload';
+import {
+  buildReqifDocument,
+  parseReqifDocument,
+  ReqifImportedRequirement,
+  ReqifLinkRef,
+  ReqifParseError,
+} from '../lib/reqif';
 
 const router = Router();
 router.use(requireAuth);
@@ -495,6 +504,368 @@ router.get(
       rows,
     };
     res.json(payload);
+  })
+);
+
+// ---------------------------------------------------------------------------
+// ReqIF 1.2 interchange (lib/reqif.ts holds the format; this holds ACLs and the transaction)
+//
+// Both routes are registered BEFORE /requirements/:id for the same reason the matrix route
+// is: `export` and `import` must never be parsed as an id. Express would not in fact confuse
+// them — they carry a third path segment — but the ordering costs nothing and survives
+// someone later shortening a path.
+// ---------------------------------------------------------------------------
+
+/**
+ * Below the shared 50 MB multer ceiling, and deliberately: the whole document is parsed into
+ * memory as one DOM before a single row is written, because "import nothing unless the whole
+ * file parses" cannot be promised by a streaming parser that has already handed rows to the
+ * caller. 25 MB of ReqIF is on the order of a hundred thousand requirements.
+ */
+const MAX_REQIF_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The same ceiling the two other bulk importers use (`IMPORT_TX_OPTIONS` in routes/erp.ts and
+ * routes/catalog.ts). Prisma's default interactive-transaction timeout is 5 seconds, which a
+ * few thousand requirements comfortably exceed — and unlike the catalog commit, this work
+ * CANNOT be split across transactions: "import nothing unless the whole file parses" means
+ * the tree lands atomically or not at all.
+ */
+const IMPORT_TX_OPTIONS = { maxWait: 15_000, timeout: 120_000 } as const;
+
+interface ReqifImportSummaryDto {
+  created: number;
+  updated: number;
+  skipped: number;
+  unknownAttributesDropped: number;
+  /** Individual `TurboPLM.Links` entries recognised and not applied — see lib/reqif.ts. */
+  linksIgnored: number;
+}
+
+/**
+ * Decode an uploaded ReqIF file as UTF-8.
+ *
+ * Two things a real export from a Windows tool routinely carries and a naive `toString('utf8')`
+ * gets wrong: a UTF-8 BOM, which is not whitespace and makes the document fail well-formedness
+ * checking on character one with a message nobody can act on; and UTF-16, which decodes as
+ * mojibake and produces an equally unhelpful error about a character in column 1.
+ */
+function decodeReqifUpload(buffer: Buffer): string {
+  if (buffer.length >= 2) {
+    const isUtf16 =
+      (buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff);
+    if (isUtf16) {
+      throw new HttpError(
+        400,
+        'The file is UTF-16 encoded. Re-export it as UTF-8, which is what ReqIF documents use.'
+      );
+    }
+  }
+  const text = buffer.toString('utf8');
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+/**
+ * A cycle in a prospective parent map, as the chain that closes it, or null.
+ *
+ * Keyed by reqNumber rather than by row id on purpose: the map has to describe the tree AFTER
+ * the import, and requirements the file creates have no id yet. reqNumber is the identity the
+ * import matches on, so it is the one name that exists for every node on both sides.
+ */
+function findParentCycle(parents: ReadonlyMap<string, string | null>): string[] | null {
+  const DONE = 2;
+  const IN_PROGRESS = 1;
+  const state = new Map<string, number>();
+
+  for (const start of parents.keys()) {
+    if (state.get(start) === DONE) continue;
+    const chain: string[] = [];
+    let cursor: string | null = start;
+    while (cursor !== null) {
+      const seen = state.get(cursor);
+      if (seen === DONE) break;
+      if (seen === IN_PROGRESS) return [...chain.slice(chain.indexOf(cursor)), cursor];
+      state.set(cursor, IN_PROGRESS);
+      chain.push(cursor);
+      cursor = parents.get(cursor) ?? null;
+    }
+    for (const node of chain) state.set(node, DONE);
+  }
+  return null;
+}
+
+router.get(
+  '/requirements/export/reqif',
+  asyncHandler(async (req, res) => {
+    const user = aclUser(req);
+
+    /*
+     * Requirement is NOT one of the five ACL-bearing types — `AclType` in lib/acl.ts is
+     * PART | DOCUMENT | ECN | PROJECT | BUILD_UNIT and the Requirement model carries no
+     * `acls` relation — so there is no filter to apply to the rows themselves, and the list
+     * and matrix routes above apply none either.
+     *
+     * The LINKS are a different matter. They name parts and documents, both of which are
+     * ACL-bearing, and a part number is exactly the kind of thing an item-level grant exists
+     * to hide. An export that dumped them would be the same leak as a list endpoint that
+     * does. They therefore go through `visibleIds` and a hidden target is exported as
+     * `Restricted`, which is what the BOM CSV export does with a redacted node and what rule
+     * X4 asks for: the link's existence is preserved, its identity is not.
+     */
+    const requirements = await prisma.requirement.findMany({
+      orderBy: { reqNumber: 'asc' },
+      include: {
+        links: {
+          orderBy: { id: 'asc' },
+          select: {
+            part: { select: { id: true, partNumber: true } },
+            document: { select: { id: true, docNumber: true } },
+          },
+        },
+      },
+    });
+
+    const [visibleParts, visibleDocuments] = await Promise.all([
+      visibleIds(
+        'PART',
+        requirements.flatMap((r) => r.links.flatMap((l) => (l.part ? [l.part.id] : []))),
+        user
+      ),
+      visibleIds(
+        'DOCUMENT',
+        requirements.flatMap((r) => r.links.flatMap((l) => (l.document ? [l.document.id] : []))),
+        user
+      ),
+    ]);
+
+    const xml = buildReqifDocument({
+      requirements: requirements.map((requirement) => ({
+        ...requirement,
+        links: requirement.links.flatMap((link): ReqifLinkRef[] => {
+          if (link.part) {
+            return [
+              {
+                kind: 'PART',
+                identifier: visibleParts.has(link.part.id) ? link.part.partNumber : REDACTED.name,
+              },
+            ];
+          }
+          if (link.document) {
+            return [
+              {
+                kind: 'DOCUMENT',
+                identifier: visibleDocuments.has(link.document.id)
+                  ? link.document.docNumber
+                  : REDACTED.name,
+              },
+            ];
+          }
+          return [];
+        }),
+      })),
+    });
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="requirements.reqif"');
+    res.send(xml);
+  })
+);
+
+/**
+ * Write a parsed document into the database, inside one transaction.
+ *
+ * The lock is the same one PATCH takes for a re-parent, and for the same reason: the cycle
+ * check below is a check-then-write over the whole tree, so a concurrent re-parent that
+ * validated against a pre-import snapshot could complete a loop neither request could see on
+ * its own.
+ */
+async function applyReqifImport(
+  parsed: { requirements: ReqifImportedRequirement[]; skipped: number },
+  userId: number
+): Promise<{ created: number; updated: number; skipped: number }> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('turboplm-requirement-tree'))::text`;
+
+    const existing = await tx.requirement.findMany({
+      select: { id: true, reqNumber: true, parentId: true, status: true },
+    });
+    const reqNumberById = new Map(existing.map((row) => [row.id, row.reqNumber]));
+    const rowByReqNumber = new Map(existing.map((row) => [row.reqNumber, row]));
+
+    /*
+     * Rule R3 — a requirement that is not DRAFT cannot be modified. PATCH refuses it with a
+     * 409 and the import must not be the way around change control: an APPROVED requirement
+     * is frozen, and quietly rewriting one because a file said so would make the approval
+     * meaningless. Such rows are counted as skipped alongside the ones the file could not
+     * identify, and everything else in the file still imports — a whole-file rejection would
+     * be worse, because a document usually contains far more DRAFT rows than frozen ones.
+     *
+     * Creating a requirement directly in APPROVED is a different thing and is allowed: there
+     * is no local approval to overwrite, and refusing would make it impossible to migrate an
+     * existing baseline in from another tool.
+     */
+    const writable = parsed.requirements.filter((requirement) => {
+      const row = rowByReqNumber.get(requirement.reqNumber);
+      return row === undefined || row.status === RequirementStatus.DRAFT;
+    });
+    const frozen = parsed.requirements.length - writable.length;
+
+    // The tree as it will be once this import lands: every existing row's current parent,
+    // overlaid with what the file says for the rows this import will actually touch.
+    const prospective = new Map<string, string | null>();
+    for (const row of existing) {
+      prospective.set(
+        row.reqNumber,
+        row.parentId === null ? null : (reqNumberById.get(row.parentId) ?? null)
+      );
+    }
+    for (const requirement of writable) {
+      prospective.set(requirement.reqNumber, requirement.parentReqNumber);
+    }
+    const cycle = findParentCycle(prospective);
+    if (cycle) {
+      // 409 rather than 400: the file is well-formed and the conflict is with rows that are
+      // already here, which is the same thing PATCH reports when a re-parent would loop.
+      throw new HttpError(
+        409,
+        `Importing this file would create a requirement cycle (${cycle.join(' -> ')}). ` +
+          'Nothing was imported.'
+      );
+    }
+
+    const idByReqNumber = new Map(existing.map((row) => [row.reqNumber, row.id]));
+    const parentIdByReqNumber = new Map(existing.map((row) => [row.reqNumber, row.parentId]));
+    let created = 0;
+    let updated = 0;
+
+    /*
+     * Pass one writes the content and leaves parentage alone, pass two sets it. Two passes
+     * because SPEC-HIERARCHY nesting freely puts a child before its parent in document order,
+     * and a single pass would have to resolve a parent row that does not exist yet.
+     *
+     * An enum the file did not carry means "unstated", not "reset to default": on an update
+     * the existing value is left alone, so importing a document from a tool that has no
+     * notion of our status column cannot silently walk an approved requirement backwards. On
+     * a create there is nothing to preserve, so the column default applies.
+     */
+    for (const requirement of writable) {
+      const enums = {
+        ...(requirement.type !== null ? { type: requirement.type } : {}),
+        ...(requirement.priority !== null ? { priority: requirement.priority } : {}),
+        ...(requirement.status !== null ? { status: requirement.status } : {}),
+      };
+      const existingId = idByReqNumber.get(requirement.reqNumber);
+      if (existingId !== undefined) {
+        await tx.requirement.update({
+          where: { id: existingId },
+          data: {
+            title: requirement.title,
+            statement: requirement.statement,
+            rationale: requirement.rationale,
+            acceptance: requirement.acceptance,
+            ...enums,
+          },
+        });
+        updated += 1;
+      } else {
+        const row = await tx.requirement.create({
+          data: {
+            reqNumber: requirement.reqNumber,
+            title: requirement.title,
+            statement: requirement.statement,
+            rationale: requirement.rationale,
+            acceptance: requirement.acceptance,
+            ...enums,
+            // Provenance, kept when the source tool recorded it. `updatedAt` is deliberately
+            // NOT taken from the file: it records when THIS installation last touched the
+            // row, and a foreign timestamp there would make the local audit trail lie.
+            ...(requirement.createdAt !== null ? { createdAt: requirement.createdAt } : {}),
+            createdById: userId,
+          },
+          select: { id: true },
+        });
+        idByReqNumber.set(requirement.reqNumber, row.id);
+        parentIdByReqNumber.set(requirement.reqNumber, null);
+        created += 1;
+      }
+    }
+
+    for (const requirement of writable) {
+      const id = idByReqNumber.get(requirement.reqNumber);
+      const parentId =
+        requirement.parentReqNumber === null
+          ? null
+          : (idByReqNumber.get(requirement.parentReqNumber) ?? null);
+      if (id === undefined || (requirement.parentReqNumber !== null && parentId === null)) {
+        // Unreachable: the parser only ever names a parent that is itself in the file, and
+        // pass one gave every file row an id. Loud rather than a silently detached subtree.
+        throw new HttpError(
+          500,
+          `Could not resolve the parent of ${requirement.reqNumber} after import`
+        );
+      }
+      if (parentIdByReqNumber.get(requirement.reqNumber) !== parentId) {
+        await tx.requirement.update({ where: { id }, data: { parentId } });
+      }
+    }
+
+    /*
+     * Nothing is reserved for the numbering, and nothing needs to be. Rule R1 allocates by
+     * scanning — `generateReqNumber` takes MAX() over the reqNumbers that exist on every
+     * allocation — so numbers that arrived from a file are visible to it the moment this
+     * transaction commits, and the next "new requirement" continues above the import instead
+     * of colliding with it. A counter that seeded once would have had to be told.
+     */
+    return { created, updated, skipped: parsed.skipped + frozen };
+  }, IMPORT_TX_OPTIONS);
+}
+
+router.post(
+  '/requirements/import/reqif',
+  // ADMIN or ENGINEER only. Enforced by `requireWriteRole`, mounted app-wide in index.ts,
+  // which refuses every non-GET from a VIEWER — the same way every other mutation in this
+  // file is guarded. Nothing extra is needed here, and adding a second check would suggest
+  // the middleware could not be relied on.
+  uploadSingle,
+  asyncHandler(async (req, res) => {
+    const file = req.file;
+    try {
+      if (!file) throw new HttpError(400, 'file is required');
+      const userId = currentUserId(req);
+      if (file.size > MAX_REQIF_BYTES) {
+        throw new HttpError(413, 'File exceeds the 25 MB ReqIF upload limit');
+      }
+
+      const xml = decodeReqifUpload(await fs.promises.readFile(absoluteStoragePath(file.filename)));
+
+      /*
+       * Parsed and validated in full BEFORE the transaction opens. Everything the file can be
+       * wrong about on its own — not XML, not ReqIF, a duplicated requirement, a missing
+       * title, an enum literal we do not have — is a ReqifParseError raised here, so a
+       * malformed document cannot leave a half-built tree behind. It never gets as far as a
+       * write to fail.
+       */
+      let parsed;
+      try {
+        parsed = parseReqifDocument(xml);
+      } catch (err) {
+        if (err instanceof ReqifParseError) throw new HttpError(400, err.message);
+        throw err;
+      }
+
+      const written = await applyReqifImport(parsed, userId);
+      const summary: ReqifImportSummaryDto = {
+        ...written,
+        unknownAttributesDropped: parsed.unknownAttributesDropped,
+        linksIgnored: parsed.linksIgnored,
+      };
+      res.status(200).json(summary);
+    } finally {
+      // The document is fully in memory by the time anything is written, so the upload has no
+      // further use — and a requirements export is customer engineering data that has no
+      // business sitting on the API server's disk.
+      if (file) removeStoredFile(file.filename);
+    }
   })
 );
 
