@@ -15,7 +15,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { SafetyOutlined } from '@ant-design/icons';
+import { DownOutlined, RightOutlined, SafetyOutlined } from '@ant-design/icons';
 import * as api from '../api/client';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -55,6 +55,10 @@ export default function SignaturePanel({
   const [signing, setSigning] = useState<SignatureMeaning | null>(null);
   const [signError, setSignError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // null means "no explicit choice yet", which is not the same as "expanded" — it lets the
+  // default below follow the manifest, and stops a user's click being overwritten the next
+  // time the panel refetches.
+  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null);
   const [form] = Form.useForm<SignFormValues>();
 
   const load = useCallback(async () => {
@@ -216,19 +220,70 @@ export default function SignaturePanel({
 
   const voided = manifest.history.filter((signature) => signature.status === 'VOIDED');
 
+  /*
+    Collapsed by default once every signature is in, expanded while any are outstanding.
+
+    The panel is tall — an alert, a table of steps, and often a second table of voided
+    signatures — and on a released part it is all settled history sitting between the reader
+    and the rest of the page. Outstanding signatures are the opposite: they block release,
+    and a reader who has to expand something to discover why they cannot release is being
+    made to hunt.
+
+    Deliberately not persisted. A remembered "collapsed" would carry from a complete part to
+    the next part the user opens and hide a live "cannot be released" from them — the one
+    state that must never be easy to miss. Deriving it per part costs the user a click and
+    cannot fail that way.
+  */
+  const collapsed = userCollapsed ?? manifest.complete;
+  const toggle = () => setUserCollapsed(!collapsed);
+
   return (
     <Card
       title={
-        <Space size={8}>
+        /*
+          The whole header toggles, not just the chevron. A 12px caret is a poor target, and
+          people click headings. Rendered as a real button so it is reachable by keyboard and
+          announces its state, rather than a div with an onClick that a screen reader sees as
+          static text.
+        */
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            margin: 0,
+            font: 'inherit',
+            color: 'inherit',
+            cursor: 'pointer',
+          }}
+        >
+          {collapsed ? <RightOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
           <span>Signatures</span>
+          {/*
+            The status tag stays in the header, so a collapsed panel still says how many
+            signatures are outstanding. Collapsing hides the detail, never the fact.
+          */}
           {manifest.complete ? (
-            <Tag color="green">Complete</Tag>
+            <Tag color="green" style={{ marginInlineEnd: 0 }}>
+              Complete
+            </Tag>
           ) : (
-            <Tag color="gold">{manifest.outstanding.length} outstanding</Tag>
+            <Tag color="gold" style={{ marginInlineEnd: 0 }}>
+              {manifest.outstanding.length} outstanding
+            </Tag>
           )}
-        </Space>
+        </button>
       }
       style={{ marginBottom: 16 }}
+      // Card keeps its body padding even with nothing in it, which leaves an empty strip
+      // under the header of every collapsed panel.
+      styles={collapsed ? { body: { display: 'none' } } : undefined}
       extra={
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           content {manifest.contentHash.slice(0, 12)}
