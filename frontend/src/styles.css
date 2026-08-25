@@ -26,3 +26,39 @@ body,
 .rfq-quote-lowest > td {
   background: #f6ffed !important;
 }
+
+/* ---------------------------------------------------------------------------
+   BOM tree readability  (mirrors saas-turboplm)
+   ---------------------------------------------------------------------------
+   A bill of materials is read by following structure, not by reading rows. Ant's
+   tree table indents with plain whitespace, which at four levels deep leaves the
+   eye nothing to track. These rules add a vertical guide per indent level and
+   tabular figures so Find # and Qty align as columns rather than drifting.
+--------------------------------------------------------------------------- */
+.bom-tree .ant-table-row-indent {
+  position: relative;
+  height: 100%;
+}
+
+.bom-tree .ant-table-row-indent::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -12px;
+  bottom: -12px;
+  border-left: 1px solid var(--bom-guide, rgba(140, 140, 140, 0.28));
+}
+
+/* Depth 0 has no parent to connect to. */
+.bom-tree .ant-table-row-indent-level-0::before {
+  display: none;
+}
+
+.bom-tree td.bom-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.bom-tree .bom-pn {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}

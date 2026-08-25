@@ -384,7 +384,9 @@ export default function BomTab({
       key: 'part',
       render: (_, row) => (
         <Space size={8}>
-          <Link to={`/parts/${row.node.part.id}`}>
+          {/* The part number keeps the link colour: it is the one token a reader scans
+              for, and inheriting the row colour made it look like ordinary prose. */}
+          <Link to={`/parts/${row.node.part.id}`} className="bom-pn">
             <Typography.Text strong={row.depth === 0} style={{ color: 'inherit' }}>
               {row.node.part.partNumber}
             </Typography.Text>
@@ -411,6 +413,7 @@ export default function BomTab({
       title: 'Find #',
       key: 'findNumber',
       width: 80,
+      className: 'bom-num',
       align: 'right',
       render: (_, row) => row.node.line.findNumber,
     },
@@ -443,6 +446,7 @@ export default function BomTab({
       title: 'Qty',
       key: 'quantity',
       width: 80,
+      className: 'bom-num',
       align: 'right',
       render: (_, row) => row.node.line.quantity,
     },
@@ -549,6 +553,7 @@ export default function BomTab({
 
       <Table<TreeRow>
         size="middle"
+        className="bom-tree"
         rowKey="key"
         columns={columns}
         dataSource={treeRows}
