@@ -11,5 +11,8 @@
   "dependencies": {
     "express": "^4.21.2",
     "occt-import-js": "^0.0.23"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

@@ -20,6 +20,28 @@ interface LoginValues {
   password: string;
 }
 
+function getSafeRedirect(state: unknown): string {
+  if (!state || typeof state !== 'object' || !('from' in state)) return '/';
+  const from = (state as { from?: { pathname?: unknown; search?: unknown } }).from;
+  if (
+    !from ||
+    typeof from.pathname !== 'string' ||
+    !from.pathname.startsWith('/') ||
+    from.pathname.startsWith('//') ||
+    from.pathname.includes('\\') ||
+    (from.search !== undefined && typeof from.search !== 'string')
+  ) {
+    return '/';
+  }
+
+  try {
+    const target = new URL(`${from.pathname}${from.search ?? ''}`, window.location.origin);
+    return target.origin === window.location.origin ? `${target.pathname}${target.search}` : '/';
+  } catch {
+    return '/';
+  }
+}
+
 /**
  * Sign-in failures the server can redirect back with. Each says what the user can do about
  * it: "failed, try again" is useless advice for a problem a retry cannot fix.
@@ -81,8 +103,7 @@ export default function Login() {
     try {
       const me = await api.login(email, password);
       setUser(me);
-      const from = (location.state as any)?.from;
-      navigate(from ? `${from.pathname}${from.search ?? ''}` : '/');
+      navigate(getSafeRedirect(location.state));
     } catch (err) {
       message.error(err instanceof ApiError ? err.message : 'Something went wrong');
     } finally {
