@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The three pages that should rank, on the apex host, at their extensionless URLs.
+
+  Extensionless because that is the URL nginx.conf is built to serve (`try_files $uri
+  $uri.html`) and the one that goes into emails and supplier questionnaires. Listing
+  /terms.html here instead would advertise a second URL for the same page and split
+  the signals between them.
+
+  /unsubscribe and /404.html are deliberately absent: one is transactional, the other
+  is not a page.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://turboplm.com/</loc>
+    <lastmod>2026-09-06</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://turboplm.com/privacy</loc>
+    <lastmod>2026-09-06</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://turboplm.com/terms</loc>
+    <lastmod>2026-09-06</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>

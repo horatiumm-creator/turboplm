@@ -1,0 +1,117 @@
+name: turboplm
+
+# Bounded container logs. Two reasons, and the second is the one people forget:
+# an unbounded json-file log fills the host disk and takes every site on it down,
+# and request logs are personal data whose retention has to be describable in a
+# privacy notice. 10 MB x 5 gives a stated, finite window.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    restart: unless-stopped
+    logging: *default-logging
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-turboplm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-turboplm}
+    ports:
+      - "127.0.0.1:5442:5432"
+    volumes:
+      - turboplm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U turboplm -d turboplm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    restart: unless-stopped
+    logging: *default-logging
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-turboplm}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-turboplm}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      PORT: "4000"
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3010}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      UPLOAD_DIR: /app/uploads
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      JSON_BODY_LIMIT: ${JSON_BODY_LIMIT:-25mb}
+      WEBHOOK_BLOCK_PRIVATE_HOSTS: ${WEBHOOK_BLOCK_PRIVATE_HOSTS:-false}
+      CAD_SERVICE_URL: ${CAD_SERVICE_URL:-http://cad:4100}
+      # Public deployments: no self-registration, no demo data/logins.
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      # Role for self-signups: VIEWER keeps a public instance read-only.
+      REGISTRATION_ROLE: ${REGISTRATION_ROLE:-VIEWER}
+    ports:
+      - "8010:4000"
+    volumes:
+      - turboplm-uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  cad:
+    restart: unless-stopped
+    logging: *default-logging
+    build: ./cad
+    environment:
+      UPLOAD_DIR: /app/uploads
+      PORT: "4100"
+    volumes:
+      - turboplm-uploads:/app/uploads
+
+  # Public marketing site for turboplm.com (the app itself lives on demo.turboplm.com).
+  landing:
+    build: ./landing
+    container_name: turboplm-landing
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - default
+      - edge
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # PUBLIC DEMO ONLY. A shared read-only VIEWER account so a visitor arriving from
+        # turboplm.com lands inside the seeded quadcopter instead of an empty login form.
+        # VIEWER cannot mutate anything (requireWriteRole), and the credential is meant to
+        # be used by strangers — that is what makes shipping it in the bundle correct here
+        # and wrong anywhere else. Unset in every other deployment, where the button then
+        # does not render at all.
+        - VITE_DEMO_EMAIL=demo@turboplm.com
+        - VITE_DEMO_PASSWORD=explore-turboplm
+    container_name: turboplm-web
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:3010:80"   # local access only; the internet arrives via the edge proxy
+    depends_on:
+      - api
+    networks:
+      - default
+      - edge
+
+networks:
+  # Shared with the Caddy reverse proxy that terminates TLS for every site on
+  # this host. Created once with: docker network create edge
+  edge:
+    external: true
+
+volumes:
+  turboplm-pgdata:
+  turboplm-uploads:

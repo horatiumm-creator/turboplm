@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — typecheck and tests
+    runs-on: ubuntu-latest
+
+    services:
+      # Throwaway instance for this job only. The database is named with the `_test`
+      # suffix the suite requires before it will truncate anything.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: turboplm
+          POSTGRES_PASSWORD: turboplm
+          POSTGRES_DB: turboplm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U turboplm -d turboplm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      TEST_DATABASE_URL: postgresql://turboplm:turboplm@localhost:5432/turboplm_test
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate the Prisma client
+        run: npx prisma generate
+
+      - name: Apply the schema to the test database
+        # Deployment uses `db push` and keeps no migration files, so the test database
+        # is built exactly the way the real one is.
+        run: npm run test:db:setup
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npx vitest run
+
+  frontend:
+    name: Frontend — typecheck
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck

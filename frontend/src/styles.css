@@ -1,0 +1,162 @@
+/* ---------------------------------------------------------------------------
+   Theme
+   ---------------------------------------------------------------------------
+   antd themes itself through its own token system, which plain CSS cannot see. These
+   variables are the bridge: `data-theme` is written onto <html> by ThemeContext (and, to
+   beat the first paint, by an inline script in index.html), and everything below reads
+   through it.
+
+   Light is the bare `:root` block so that a browser which never gets the attribute — script
+   blocked, or an older cached index.html — still renders a coherent page rather than an
+   unstyled one.
+
+   The dark tints are not the light ones darkened. A pale wash that reads as "added" on white
+   becomes a muddy grey at low luminance, so each one is re-picked as a low-luminance colour
+   that keeps its hue against a dark surface while leaving antd's light body text legible on
+   top of it.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --app-bg: #f2f4f7;
+  --tint-added: #f6ffed;
+  --tint-removed: #fff1f0;
+  --tint-changed: #fffbe6;
+  --panel-accent: #f5f8ff;
+  --bom-guide: rgba(140, 140, 140, 0.28);
+}
+
+[data-theme='dark'] {
+  --app-bg: #16181c;
+  --tint-added: #16261a;
+  --tint-removed: #2b1618;
+  --tint-changed: #2a2413;
+  --panel-accent: #1a2130;
+  /* Lighter and slightly more opaque than the light-mode guide: a hairline that reads as a
+     faint pencil line on white disappears entirely against a dark table. */
+  --bom-guide: rgba(200, 205, 215, 0.22);
+}
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--app-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* BOM compare row tints */
+.compare-row-added > td {
+  background: var(--tint-added) !important;
+}
+.compare-row-removed > td {
+  background: var(--tint-removed) !important;
+}
+.compare-row-changed > td {
+  background: var(--tint-changed) !important;
+}
+
+/* Lowest quote on an RFQ line */
+.rfq-quote-lowest > td {
+  background: var(--tint-added) !important;
+}
+
+/* Requirement with no part covering it */
+.req-uncovered > td {
+  background: var(--tint-removed) !important;
+}
+
+/* Inset explanatory panels (ECN detail) */
+.panel-accent {
+  background: var(--panel-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   BOM tree readability  (mirrors saas-turboplm)
+   ---------------------------------------------------------------------------
+   A bill of materials is read by following structure, not by reading rows. Ant's
+   tree table indents with plain whitespace, which at four levels deep leaves the
+   eye nothing to track. These rules add a vertical guide per indent level and
+   tabular figures so Find # and Qty align as columns rather than drifting.
+--------------------------------------------------------------------------- */
+.bom-tree .ant-table-row-indent {
+  position: relative;
+  height: 100%;
+}
+
+.bom-tree .ant-table-row-indent::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -12px;
+  bottom: -12px;
+  border-left: 1px solid var(--bom-guide, rgba(140, 140, 140, 0.28));
+}
+
+/* Depth 0 has no parent to connect to. */
+/* antd names these `indent-level-N`, NOT `ant-table-row-indent-level-N`. Getting it wrong
+   is silent: the rule simply never matches and every top-level row draws a guide line at
+   zero indent — a stray hairline down the left of the Part column with no tree to mark. */
+.bom-tree .indent-level-0::before {
+  display: none;
+}
+
+.bom-tree td.bom-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.bom-tree .bom-pn {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* -------------------------------------------------------------------------
+   Resizable table headers (see components/ResizableTitle.tsx)
+   ------------------------------------------------------------------------- */
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Inside the cell, not straddling its edge. Ellipsis columns carry `overflow: hidden`
+     on the header itself, so a handle hung over the boundary is clipped away on exactly
+     the columns most likely to need widening. */
+  right: 0;
+  width: 8px;
+  cursor: col-resize;
+  /* Wider than the line it appears to grab. A 1px target is a test of aim, not a control;
+     8px is grabbable without hunting for it and still narrow enough not to swallow clicks
+     meant for the column-sort header beside it. */
+  touch-action: none;
+  user-select: none;
+  z-index: 1;
+}
+
+/* The handle is invisible until pointed at — a permanent grip line on every header would
+   add nine vertical rules to a table that already has borders. */
+.col-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--ant-color-primary, #1677ff);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.col-resize-handle:hover::after,
+.col-resize-handle:active::after {
+  opacity: 1;
+}
+
+/* antd draws its own faint separator between headers via `th::before`. Under the pointer it
+   sits directly behind the handle's indicator and muddies it. */
+.ant-table-thead th:has(.col-resize-handle:hover)::before {
+  opacity: 0;
+}

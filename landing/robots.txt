@@ -1,0 +1,20 @@
+# https://turboplm.com
+#
+# The apex is canonical here: og:url declares it, every self-link on the page uses
+# it, and www now redirects to it.
+User-agent: *
+Allow: /
+
+# Reached only from a link in an email, and useful to exactly one recipient. There
+# is nothing sensitive in it, but it is not a page anyone should arrive at from a
+# search result, and it would dilute the handful of URLs that should rank.
+Disallow: /unsubscribe
+
+# The application itself. Both deployments are behind a sign-in screen, so a crawler
+# spends its budget on a login form and indexes nothing of value. saas.turboplm.com
+# additionally sends X-Robots-Tag: noindex at the edge; this is the same instruction
+# said earlier, to a crawler that has not requested the page yet.
+Disallow: /login
+Disallow: /register
+
+Sitemap: https://turboplm.com/sitemap.xml

@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=AW-17893534679"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'AW-17893534679');
+</script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- This was "TurboPLM" alone, on the reasoning that "a tab is a label, not a pitch" and
+     that `description` and `og:title` "are what search results and link previews actually
+     render". Half of that is right and the important half is not.
+
+     og:title governs LINK PREVIEWS — Slack, iMessage, LinkedIn — and there it was doing its
+     job. It does not govern search results. Google generates the result headline primarily
+     from the <title> element: "title elements are now used around 87% of the time"
+     (https://developers.google.com/search/blog/2021/09/more-info-about-titles), and the
+     documentation on influencing title links lists <title> first among its sources
+     (https://developers.google.com/search/docs/appearance/title-link). og:title is not on
+     that list.
+
+     So the bare title was not a neutral choice about tab labels. It was spending the single
+     strongest on-page relevance signal, and the headline of every search result, on a word
+     nobody searches for — because "TurboPLM" is a term you can only type if you already
+     know the product exists, which is the one audience that does not need to find it.
+
+     Brand first, so a truncated tab still reads "TurboPLM" and the label argument survives
+     intact; then the two terms an evaluator actually types. 57 characters, so nothing is
+     cut. -->
+<title>TurboPLM — Open Source, Self-Hosted PLM for Hardware Teams</title>
+<!-- Under 160 characters so it is not truncated mid-sentence, and it leads with the
+     category rather than a feature list. Both prices are on the page: self-hosting is free
+     with no limits, and the hosted Pro tier is 10 USD per month. -->
+<meta name="description" content="Open-source PLM for hardware teams: multi-level BOM, revisions, ECR/ECN change control, 3D CAD in the browser. Self-host free under AGPL, or $10/month hosted." />
+<meta property="og:title" content="TurboPLM — Self-hosted Product Lifecycle Management" />
+<meta property="og:description" content="Product structure, BOM, revisioning, change control and as-built traceability — on your own hardware." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://turboplm.com/" />
+<meta property="og:site_name" content="TurboPLM" />
+
+<!-- The apex is the canonical host: this og:url has always said so, every self-link
+     on the page uses it, and www now 301s here. This repeats it for a crawler that
+     arrived on some other URL shape — a link carrying a tracking parameter, say.
+
+     That redirect lives in the shared Caddy config rather than in this directory's
+     nginx.conf: nginx sits behind the proxy on `server_name _` and never learns which
+     hostname was requested, so the hostname decision can only be made one layer up. -->
+<link rel="canonical" href="https://turboplm.com/" />
+
+<!-- The page had og:title and og:description but no image, so every share of this
+     link rendered as a bare row of text. -->
+<meta property="og:image" content="https://turboplm.com/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="TurboPLM — open-source PLM you run on your own hardware" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="TurboPLM — Self-hosted Product Lifecycle Management" />
+<meta name="twitter:description" content="Product structure, BOM, revisioning, change control and as-built traceability — on your own hardware." />
+<meta name="twitter:image" content="https://turboplm.com/og.png" />
+
+<!-- Every value below is taken from copy already on this page: the AGPL-3.0 licence,
+     "Free for one person and up to 100 parts, with no card", and "10 USD per month".
+     Nothing is asserted here that a visitor cannot also read, which is the only safe
+     way to write an Offer — a price in structured data that disagrees with the price
+     on the page is the kind of mismatch that gets rich results withdrawn.
+
+     No address, areaServed or LocalBusiness: the software runs on the customer's own
+     infrastructure and there is no premises or service area to describe. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://turboplm.com/#software",
+  "name": "TurboPLM",
+  "url": "https://turboplm.com/",
+  "applicationCategory": "BusinessApplication",
+  "applicationSubCategory": "Product Lifecycle Management",
+  "operatingSystem": "Docker (Linux, macOS, Windows)",
+  "description": "Open source, self-hosted product lifecycle management: part master, multi-level bills of material, part revisioning, engineering change control, manufacturing routings, requirements traceability and item-level access control.",
+  "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+  "isAccessibleForFree": true,
+  "image": "https://turboplm.com/og.png",
+  "logo": "https://turboplm.com/logo.png",
+  "featureList": [
+    "Multi-level bill of materials with where-used, compare and baselines",
+    "Part revisioning with enforced lifecycle states",
+    "ECR to ECN engineering change control with approval workflows",
+    "Manufacturing process routings",
+    "3D CAD viewing for STEP, IGES and BREP in the browser",
+    "Requirements traceability",
+    "Serial and lot traceability",
+    "Item-level access control"
+  ],
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "One person and up to 100 parts, with no card."
+    },
+    {
+      "@type": "Offer",
+      "name": "Pro",
+      "price": "10",
+      "priceCurrency": "USD",
+      "description": "The same software with the seat and part limits removed.",
+      "priceSpecification": {
+        "@type": "UnitPriceSpecification",
+        "price": "10",
+        "priceCurrency": "USD",
+        "unitCode": "MON"
+      }
+    }
+  ],
+  "publisher": {
+    "@type": "Organization",
+    "name": "Hai-Soft",
+    "url": "https://www.hai-soft.com/"
+  }
+}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e6fd9'/%3E%3Ctext x='50' y='69' font-size='54' font-family='Helvetica,Arial,sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3ET%3C/text%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#ffffff; --bg-alt:#f6f8fb; --bg-deep:#0b1524;
+    --text:#111a28; --muted:#5b6a80; --line:#e3e8ef;
+    --accent:#1e6fd9; --accent-soft:#e8f1fd; --accent-deep:#1656ab;
+    --ok:#1f9d55; --warn:#c47f0a;
+    --radius:12px; --max:1120px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b1220; --bg-alt:#111a2b; --bg-deep:#070d18;
+      --text:#e8edf5; --muted:#93a2b8; --line:#1e2a3d;
+      --accent:#4d94f0; --accent-soft:#12233c; --accent-deep:#75aef5;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  h1,h2,h3{line-height:1.2;margin:0 0 .5em;letter-spacing:-0.02em}
+  h2{font-size:clamp(1.6rem,3.4vw,2.3rem);margin-top:0}
+  h3{font-size:1.06rem;margin-bottom:.35em}
+  p{margin:0 0 1em}
+  .lede{color:var(--muted);font-size:1.06rem;max-width:62ch}
+
+  /* header */
+  header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px;gap:24px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.12rem;color:var(--text)}
+  .brand:hover{text-decoration:none}
+  .mark{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
+  .nav-links{display:flex;gap:22px;align-items:center;font-size:.94rem}
+  .nav-links a{color:var(--muted)}
+  .nav-links a:hover{color:var(--text);text-decoration:none}
+  @media(max-width:760px){.nav-links{display:none}}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent;cursor:pointer;transition:.15s}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-deep);color:#fff}
+  .btn-ghost{border-color:var(--line);color:var(--text);background:var(--bg)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-sm{padding:8px 14px;font-size:.88rem}
+
+  /* sections */
+  section{padding:76px 0;border-top:1px solid var(--line)}
+  section.alt{background:var(--bg-alt)}
+  .eyebrow{text-transform:uppercase;letter-spacing:.09em;font-size:.76rem;font-weight:700;color:var(--accent);margin-bottom:10px}
+
+  /* hero */
+  .hero{padding:84px 0 72px;border-top:none}
+  .hero h1{font-size:clamp(2.1rem,5.2vw,3.4rem)}
+  .hero .lede{font-size:1.18rem;max-width:66ch}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+  .hero-note{margin-top:18px;font-size:.9rem;color:var(--muted)}
+
+  /* product mock */
+  .mock{margin-top:52px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--bg);box-shadow:0 18px 44px rgba(9,20,38,.10)}
+  .mock-bar{display:flex;align-items:center;gap:7px;padding:10px 14px;background:var(--bg-alt);border-bottom:1px solid var(--line)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--line)}
+  .mock-url{margin-left:10px;font-size:.78rem;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .mock-body{display:grid;grid-template-columns:186px 1fr;min-height:330px}
+  .mock-side{background:var(--bg-deep);padding:16px 12px;display:flex;flex-direction:column;gap:3px}
+  .mock-side b{color:#fff;font-size:.9rem;padding:6px 10px 12px;display:flex;align-items:center;gap:8px}
+  .mock-side span{color:#9fb3cd;font-size:.82rem;padding:7px 10px;border-radius:7px}
+  .mock-side span.on{background:var(--accent);color:#fff;font-weight:600}
+  /* grouped nav: a parent row carries a caret, children sit indented under it */
+  .mock-side span.grp{display:flex;align-items:center;justify-content:space-between}
+  .mock-side span.grp::after{content:"⌄";font-size:.7rem;opacity:.65}
+  .mock-side span.grp.open::after{content:"⌃"}
+  .mock-side span.sub{padding-left:24px;font-size:.79rem}
+  .mock-main{padding:20px 22px;overflow:hidden}
+  .mock-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .mock-h strong{font-size:1.02rem}
+  .tag{font-size:.7rem;padding:2px 8px;border-radius:5px;font-weight:700;border:1px solid var(--line);color:var(--muted)}
+  .tag.rel{background:rgba(31,157,85,.12);color:var(--ok);border-color:transparent}
+  .tag.wip{background:rgba(196,127,10,.14);color:var(--warn);border-color:transparent}
+  .tag.asm{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  table.bom{width:100%;border-collapse:collapse;font-size:.83rem;margin-top:14px}
+  table.bom th{text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:700}
+  table.bom td{padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.bom .pn{color:var(--accent);font-weight:600}
+  .ind1{padding-left:22px !important}
+  .ind2{padding-left:40px !important}
+  @media(max-width:700px){.mock-body{grid-template-columns:1fr}.mock-side{display:none}.mock-main{padding:14px}table.bom .hide-s{display:none}}
+
+  /* video */
+  .video-wrap{margin-top:32px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#000;box-shadow:0 18px 44px rgba(9,20,38,.14)}
+  .video-wrap video{display:block;width:100%;height:auto;aspect-ratio:16/10}
+
+  /* grids */
+  .grid{display:grid;gap:18px;margin-top:34px}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(228px,1fr))}
+  .card{border:1px solid var(--line);border-radius:var(--radius);padding:22px;background:var(--bg)}
+  .card p{color:var(--muted);font-size:.93rem;margin:0}
+  /* capability group heading: enough separation to scan by area, not a full section break */
+  .cap-group{margin-top:46px}
+  .cap-group:first-of-type{margin-top:30px}
+  .cap-group > h3{font-size:.82rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
+    font-weight:700;margin:0;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .cap-group .grid{margin-top:18px}
+  .ico{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:13px;font-size:17px}
+  ul.check{list-style:none;padding:0;margin:0}
+  ul.check li{position:relative;padding-left:26px;margin-bottom:9px;color:var(--muted);font-size:.94rem}
+  ul.check li::before{content:"✓";position:absolute;left:0;top:-1px;color:var(--ok);font-weight:800}
+
+  /* demo callout */
+  .demo-box{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:24px;background:var(--bg);display:flex;gap:26px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+  .creds{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;background:var(--bg-alt);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}
+  .creds div{white-space:nowrap}
+
+  /* stack */
+
+  footer{background:var(--bg-deep);color:#9fb3cd;padding:52px 0 34px;border-top:1px solid var(--line)}
+  footer h4{color:#fff;font-size:.86rem;text-transform:uppercase;letter-spacing:.07em;margin:0 0 12px}
+  footer a{color:#c3d3e8;font-size:.92rem;display:block;margin-bottom:8px}
+  .foot-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:40px}
+  @media(max-width:760px){.foot-grid{grid-template-columns:1fr;gap:28px}}
+  .foot-bot{border-top:1px solid rgba(255,255,255,.1);margin-top:34px;padding-top:20px;font-size:.85rem;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top"><span class="mark">T</span> TurboPLM</a>
+    <nav class="nav-links">
+      <a href="#tour">Tour</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#change">Change control</a>
+      <a href="#access">Access</a>
+      <a href="#demo">Live demo</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#selfhosted">Self-hosted</a>
+      <a href="#consulting">Consulting</a>
+      <!-- The one link on this page for someone who is already a customer. It goes to the
+           hosted product, NOT to the demo instance: a returning user typing their password
+           into a shared read-only demo is a support ticket that looks like a broken login. -->
+      <a href="https://saas.turboplm.com/login">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<section class="hero">
+  <div class="wrap">
+    <!-- Was "Self-hosted product lifecycle management". Accurate, but as the first line on the
+         page it answered a question nobody had yet asked and closed off the one that matters:
+         a reader who learns "self-hosted" before anything else concludes there is nothing here
+         to sign up for and leaves. Self-hosting is still true, still free, and still has its
+         own section — it is a way to run it, not the category it belongs to. -->
+    <div class="eyebrow">Product lifecycle management for hardware teams</div>
+    <h1>Your product structure, under your control</h1>
+    <p class="lede">
+      TurboPLM manages the things a hardware team actually lives in: the part master, the
+      multi-level bill of materials, revisions and their lifecycles, manufacturing
+      processes, and the engineering change control that keeps all of it honest — then
+      follows the product past release, into what was built and what came back from the
+      field. Start on ours in a minute, or run the whole thing on your own hardware.
+    </p>
+    <!-- The primary action is starting, not looking. "Try the live demo" was the primary
+         button and it led to a read-only account on a shared instance — the most prominent
+         thing on the page asked people to browse someone else's data rather than open their
+         own workspace. The demo is still one click away, as the secondary. -->
+    <div class="cta">
+      <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
+      <a class="btn btn-ghost" href="#demo">Try the live demo</a>
+      <a class="btn btn-ghost" href="#consulting">Get expert help</a>
+    </div>
+    <p class="hero-note">
+      Free for one person and up to 100 parts, with no card. Or run it on your own
+      hardware — <a href="#selfhosted">the whole thing is open source</a>.
+    </p>
+    <div class="mock" aria-label="Illustration of the TurboPLM bill-of-materials view">
+      <div class="mock-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="mock-url">turboplm.com/parts/1</span>
+      </div>
+      <div class="mock-body">
+        <div class="mock-side">
+          <b><span class="mark" style="width:20px;height:20px;font-size:11px;border-radius:6px">T</span> TurboPLM</b>
+          <span>Dashboard</span>
+          <span>My Work</span>
+          <span class="grp open">Product</span>
+          <span class="sub on">Parts</span>
+          <span class="sub">Documents</span>
+          <span class="sub">Requirements</span>
+          <span class="sub">Materials</span>
+          <span class="sub">BOM Compare</span>
+          <span class="sub">Baselines</span>
+          <span class="grp">Changes</span>
+          <span class="grp">Manufacturing</span>
+          <span class="grp">Sourcing</span>
+          <span>Projects</span>
+          <span class="grp">Insights</span>
+        </div>
+        <div class="mock-main">
+          <div class="mock-h">
+            <strong>DRN-1000 — TurboDrone X1 Quadcopter</strong>
+            <span class="tag asm">Assembly</span>
+            <span class="tag wip">In Work</span>
+          </div>
+          <!-- Revision B deliberately: it is the only state in which an In Work child (the new
+               LED set) can appear, because the release gate refuses to release a parent whose
+               child has no released revision. A mock showing that combination as Released would
+               contradict the rule this same page sells. -->
+          <div style="font-size:.8rem;color:var(--muted)">Revision B · bill of materials</div>
+          <table class="bom">
+            <thead>
+              <tr><th>Part</th><th class="hide-s">Find</th><th>Qty</th><th>Rev</th><th class="hide-s">State</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="pn">ASM-1100</span> Frame Assembly</td><td class="hide-s">10</td><td>1</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">MEC-2001</span> Carbon Fiber Arm</td><td class="hide-s">10</td><td>4</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">PUR-4001</span> M3×8 Cap Screw</td><td class="hide-s">40</td><td>16</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td><span class="pn">ASM-1120</span> Power Module Assembly</td><td class="hide-s">30</td><td>1</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind1"><span class="pn">ASM-1121</span> Battery Pack Assembly</td><td class="hide-s">10</td><td>1</td><td>B</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td class="ind2"><span class="pn">PUR-4005</span> Li-ion Cell 18650</td><td class="hide-s">10</td><td>8</td><td>A</td><td class="hide-s"><span class="tag rel">Released</span></td></tr>
+              <tr><td><span class="pn">ELE-3007</span> LED Navigation Light Set</td><td class="hide-s">50</td><td>1</td><td>A</td><td class="hide-s"><span class="tag wip">In Work</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <div class="eyebrow">Product tour</div>
+    <h2>See it in action</h2>
+    <p class="lede">
+      Under three minutes through the real application — the part master, a four-level bill
+      of materials, a structure comparison, a change notice with its dispositions and
+      signatures, CAD in the browser, the CAD BOM reconciled against engineering, serial and
+      lot traceability, and the analytics over the top. No narration; captions carry it.
+    </p>
+    <p style="font-size:.88rem;color:var(--muted);margin-top:-4px">
+      Recorded before the most recent additions, so materials planning, the document vault,
+      redline review and item-level access are not in this cut — the
+      <a href="#capabilities">capabilities</a> above and the
+      <a href="#demo">live demo</a> below cover them.
+    </p>
+    <div class="video-wrap">
+      <video controls preload="metadata" poster="poster.jpg" playsinline>
+        <source src="tour.mp4" type="video/mp4" />
+        Your browser cannot play this video —
+        <a href="tour.mp4">download it instead</a>.
+      </video>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="capabilities">
+  <div class="wrap">
+    <div class="eyebrow">Capabilities</div>
+    <h2>Everything a product record needs</h2>
+    <p class="lede">Not a document dump with a parts list bolted on — a real product data model with the rules enforced on the server.</p>
+
+    <div class="cap-group">
+      <h3>Product structure</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">◫</div>
+          <h3>Parts &amp; revisions</h3>
+          <p>Lettered revisions with a lifecycle state machine — In Work, In Review, Released, Obsolete. Released revisions are immutable, enforced server-side, not by convention.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌗</div>
+          <h3>Multi-level eBOM</h3>
+          <p>Find numbers, quantities, units, reference designators, an indented structure tree, cycle prevention and where-used. Children resolve to their latest released revision — and a child that has none is shown at its working revision and flagged unreleased, rather than quietly omitted.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇄</div>
+          <h3>BOM compare &amp; baselines</h3>
+          <p>Diff any two revisions — or two entirely different products — as one aligned tree. Freeze a structure as a named baseline and compare baselines to each other.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◇</div>
+          <h3>Effectivity, alternates, variants</h3>
+          <p>Date-effective BOM lines with an “as of” view, substitute parts per line, and option-driven variants resolved by a configurator.</p>
+        </div>
+        <div class="card">
+          <div class="ico">≡</div>
+          <h3>Requirements traceability</h3>
+          <p>Typed requirements with decomposition, linked to the parts that satisfy them and the documents that verify them, plus a coverage matrix.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap-group">
+      <h3>Documents &amp; CAD</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">◈</div>
+          <h3>Versioned documents</h3>
+          <p>Every upload is a new version, never an overwrite, linked to the parts, revisions and changes it belongs to. The whole history stays downloadable.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⊙</div>
+          <h3>The vault: check out, check in</h3>
+          <p>Take the lock before you edit and nobody else can upload over you. Locks show who holds them and expire on their own, so a colleague on holiday never blocks the drawing.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◉</div>
+          <h3>3D CAD in the browser</h3>
+          <p>STEP, IGES and BREP tessellated server-side by an OpenCascade kernel, plus STL, glTF, OBJ and 3MF — orbit and inspect an assembly with no plugin and no desktop licence.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✎</div>
+          <h3>Redline markup &amp; review</h3>
+          <p>Pin a comment to a point on a 3D model or an image and thread the discussion there; PDFs and other formats take document-level notes. When a redline turns out to be a real change, escalate it into a change request that carries the whole thread with it.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◫</div>
+          <h3>cBOM from CAD</h3>
+          <p>Read the assembly structure straight out of a STEP file, match products to parts, and reconcile all three views: what was modelled, what engineering released, and what manufacturing consumes.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap-group">
+      <h3>Manufacturing &amp; the floor</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">⚙</div>
+          <h3>Process plans (mBOM)</h3>
+          <p>Per-revision routings: sequenced operations with work centers and setup/run times, each consuming materials — the mBOM alongside the engineering one, reconciled against it.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⬡</div>
+          <h3>Materials &amp; what to buy</h3>
+          <p>Declare the stock a machined part draws — alloy, form, net quantity, scrap factor. Explode a build of any quantity into gross material totals and estimated cost, with the parts that declare <em>no</em> material listed just as loudly, because those are the holes you would otherwise order against.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌗</div>
+          <h3>Serial &amp; lot traceability</h3>
+          <p>Record what was actually built, not just what was designed. Ask which shipped serial numbers contain a suspect lot and get the list, with the chain of consumptions that put it there — plus an as-built versus as-designed report showing every substitution and unplanned draw.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⚒</div>
+          <h3>Service &amp; as-maintained</h3>
+          <p>A unit in the field is not the unit you shipped. Book a repair against a serial number, record the part that came out and the one that went in, and the genealogy updates — so the as-maintained structure stays true years after release.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌸</div>
+          <h3>Quality: NCR &amp; CAPA</h3>
+          <p>Nonconformances with severity, quantity and disposition that escalate straight into a change, and CAPAs whose Verify step refuses to advance without a root cause and a corrective action, and whose Close step refuses while any linked nonconformance is still open.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap-group">
+      <h3>Change, approval &amp; access</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">⟳</div>
+          <h3>Engineering change control</h3>
+          <p>Requests triaged into change notices, affected items with from → to revisions and stock dispositions, effectivity by date or by serial number, and a printable notice for the floor. <a href="#change">The rules it enforces →</a></p>
+        </div>
+        <div class="card">
+          <div class="ico">✓</div>
+          <h3>Electronic signatures</h3>
+          <p>Signature requirements per role or named signer, password re-entry at the moment of signing, and a printable record carrying printed name, meaning and timestamp. The authentication method is recorded on every signature, so the strength of each one stays auditable. Change what a signer attested to — the affected items, their revisions, their dispositions — and the signature voids itself.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⊘</div>
+          <h3>Item-level access control</h3>
+          <p>Restrict an individual part, document, change, project or build unit to named people and groups. A restricted item answers exactly like one that does not exist — absent from lists, absent from search, and a plain 404 on a direct hit, because a “forbidden” reply already tells an outsider it is there.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◐</div>
+          <h3>Redaction that keeps the maths honest</h3>
+          <p>A restricted child on a BOM you <em>can</em> read stays as a Restricted row with its quantity intact — never silently dropped. Roll-ups say so when a total could not be completed, so no one mistakes a censored number for a small one.</p>
+        </div>
+        <div class="card">
+          <div class="ico">▤</div>
+          <h3>Projects &amp; phase gates</h3>
+          <p>Projects with an ordered gate set and deliverables bound to parts, documents, requirements or changes. A gate refuses to pass while an earlier gate is open or a required deliverable is outstanding.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap-group">
+      <h3>Sourcing &amp; cost</h3>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">$</div>
+          <h3>Cost roll-up</h3>
+          <p>Unit costs rolled through the multi-level BOM, with the parts whose cost is unknown named rather than quietly counted as zero.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⌾</div>
+          <h3>AML &amp; supplier RFQ</h3>
+          <p>Approved manufacturer lists per part, then RFQs with quote comparison, lead time, MOQ, automatic lowest-price flagging and award tracking.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇄</div>
+          <h3>Supplier portal</h3>
+          <p>Invite a supplier to quote and they get their own scoped login. They see the lines and their own prices — never a competitor's price, never who won, never an RFQ they weren't invited to.</p>
+        </div>
+        <div class="card">
+          <div class="ico">↧</div>
+          <h3>Vendor catalog import</h3>
+          <p>Drop in a distributor's CSV export — Digi-Key, Mouser, Farnell/Newark and RS Components are recognised from their column headers alone — map the columns once, and see every row classified as new, an update or a problem <em>before</em> anything is written. A careless import is how a part master fills with duplicates.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="change">
+  <div class="wrap">
+    <div class="eyebrow">The difference</div>
+    <h2>Change control that actually holds</h2>
+    <p class="lede">
+      Most lightweight tools let you edit a BOM and call it a day. TurboPLM treats a change
+      as a governed object, because that is the part auditors, customers and your own
+      future self care about.
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>A complete change chain</h3>
+        <ul class="check">
+          <li>Requests (ECR) raised against a part, triaged and accepted into a change notice</li>
+          <li>Change notices (ECN) carrying affected items and from → to revisions</li>
+          <li>Effectivity by date <em>or</em> by serial number — “from unit 0042 onward” is how a factory actually cuts a change in</li>
+          <li>Stock disposition per part: use as is, rework, scrap, return to vendor</li>
+          <li>A printable change notice for the people on the shop floor</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Rules the server enforces</h3>
+        <ul class="check">
+          <li>A part can sit on only one active change at a time</li>
+          <li>Revisions under a change cannot be released behind its back</li>
+          <li>Releasing a change releases every one of its revisions atomically</li>
+          <li>Nothing releases while a child part is still unreleased</li>
+          <li>Mutations through the internal API land in an audit trail with who, what and when</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Approvals that fit your process</h3>
+        <ul class="check">
+          <li>Flat reviewer sign-off, or a configurable multi-step workflow</li>
+          <li>Steps that need any one approver, or all of them</li>
+          <li>Assignees by named user or by role</li>
+          <li>Tasks queued in each reviewer’s inbox, with notifications</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Know the blast radius first</h3>
+        <ul class="check">
+          <li>Where-used rollup across every affected part before you approve</li>
+          <li>Side-by-side BOM diff of exactly what the change does</li>
+          <li>Requirement coverage so you see what a change puts at risk</li>
+          <li>Analytics on change cycle time and BOM health</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="access">
+  <div class="wrap">
+    <div class="eyebrow">Need to know</div>
+    <h2>Not everyone should see everything</h2>
+    <p class="lede">
+      A customer programme under NDA, an export-controlled assembly, an acquisition still
+      unannounced — most PLM either gives everyone the whole database or forces you into a
+      second system. TurboPLM lets you close a single item without splitting your product
+      record in two.
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>Closed means invisible, not scolded</h3>
+        <ul class="check">
+          <li>Grant a part, document, change, project or build unit to named people and groups</li>
+          <li>A restricted item is absent from lists, absent from search and absent from exports</li>
+          <li>A direct hit answers <code>404</code>, byte for byte the same as an item that never existed — a “forbidden” reply would confirm it is there</li>
+          <li>Read access and write access are separate grants, so a reviewer can be let in without being let loose</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Opt-in, so nothing changes until you say so</h3>
+        <ul class="check">
+          <li>An item with no grants behaves exactly as before — deploying this locks nobody out</li>
+          <li>The <em>first</em> grant is what closes an item, and the interface says so before you add it</li>
+          <li>Group membership is resolved at query time; deactivating a group suspends every grant it holds at once</li>
+          <li>Administrators always retain a way back in, so an item cannot be orphaned</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Hidden without lying</h3>
+        <ul class="check">
+          <li>A restricted child on a BOM you can read stays visible as a <em>Restricted</em> row with its quantity intact</li>
+          <li>Cost and material roll-ups that crossed something hidden say so, rather than returning a smaller number that looks complete</li>
+          <li>A recall trace still walks <em>through</em> restricted assemblies, so the shipped list is never quietly short</li>
+          <li>Where-used still reports that something you cannot see consumes this part — the honest answer to “is it safe to change?”</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Verified, not asserted</h3>
+        <ul class="check">
+          <li>The test suite enumerates the server's own GET route table at runtime and drives each route against a restricted item</li>
+          <li>A read endpoint added tomorrow is swept the moment it is registered — and the sweep fails if it cannot address a route, rather than scoring it as covered</li>
+          <li>Access is resolved in one place in the codebase — no route re-implements the rules</li>
+          <li>Machine credentials are subject to the same filter; an API key never outranks the person who created it</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="eyebrow">Live demo</div>
+    <h2>Try it on real data</h2>
+    <p class="lede">
+      A running instance, seeded with a four-level quadcopter product — two variants that
+      share subassemblies, released and in-work revisions, process plans, a declared
+      material catalog with one part deliberately left unspecified so the planning gap is
+      visible, drawings under vault control with live redline threads, serialised build
+      units with their as-built genealogy, field service records, and changes in flight.
+      Create an account and click around.
+    </p>
+    <div class="demo-box">
+      <div>
+        <h3 style="margin-bottom:6px">Create your own account</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0 0 16px;max-width:52ch">
+          Sign up with an email and password, or continue with Google. Accounts are
+          read-only, so you can explore the whole system without changing the shared
+          demo data.
+        </p>
+        <!-- "Sign up free" used to live here, pointing at the demo. It was the most
+             conversion-shaped phrase on the page attached to the one destination that is not
+             the product: a read-only account on an instance whose data everyone shares. The
+             label now says what the button actually does. Starting for real is #pricing. -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a class="btn btn-primary" href="https://demo.turboplm.com/register">Create a demo account</a>
+          <a class="btn btn-ghost" href="https://demo.turboplm.com/login">Sign in to the demo</a>
+        </div>
+        <p style="color:var(--muted);font-size:.9rem;margin:14px 0 0;max-width:52ch">
+          Looking for your own private workspace instead?
+          <a href="#pricing">Start free</a> — nothing shared, nothing read-only.
+        </p>
+      </div>
+      <ul class="check" style="margin:0">
+        <li>No approval step — you are in immediately</li>
+        <li>Explore every module with real product data</li>
+        <li>Nothing to install</li>
+      </ul>
+    </div>
+
+    <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
+      Prefer your own copy? <code>git clone</code>, <code>docker compose up -d --build</code>,
+      and you have the same thing on your laptop in a couple of minutes — demo data included.
+      <a href="#selfhosted">Get the source →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ===========================================================================
+     PRICING
+     Sits between the demo and the self-hosted section on purpose: a reader who has
+     just been told the demo is read-only and shared needs the next thing they see to
+     be how to get one that is not, and a reader who then decides they would rather run
+     it themselves finds that immediately below.
+
+     The price is stated in full, in the card, at full size. An earlier draft put the
+     Pro offer in muted small print; the nav item that brings people here says
+     "Pricing", and answering that click with a footnote wastes it.
+     =========================================================================== -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="eyebrow">Pricing</div>
+    <h2>Free to start. 10 USD a month when you outgrow it.</h2>
+    <p class="lede">
+      The <a href="#demo">live demo</a> is read-only and shared. This is the real thing:
+      your own workspace, your own parts, yours to change. Both plans are the same
+      software — every module, nothing held back for the paid one. The only differences
+      are the two limits below.
+    </p>
+
+    <div class="grid g2">
+      <div class="card">
+        <h3>Free</h3>
+        <div style="margin:2px 0 6px"><strong style="font-size:2rem">0 USD</strong></div>
+        <p style="margin:0 0 18px">No card required. No expiry — it does not turn into a trial.</p>
+        <ul class="check">
+          <li>One member — just you</li>
+          <li>Up to 100 parts</li>
+          <li>Every module, exactly as Pro has it</li>
+          <li>Your own private workspace, not the shared demo</li>
+        </ul>
+        <div style="margin-top:20px">
+          <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Pro</h3>
+        <div style="margin:2px 0 6px"><strong style="font-size:2rem">10 USD</strong> per month</div>
+        <p style="margin:0 0 18px">One price for the whole organisation, not per person.</p>
+        <ul class="check">
+          <li>Unlimited members — invite everyone, the price does not move</li>
+          <li>Unlimited parts</li>
+          <li>The same software as Free, with those two limits removed</li>
+          <li>Monthly by card through Stripe. Cancel any time.</li>
+        </ul>
+        <p style="margin:18px 0 0">
+          Start on Free and move up from inside your workspace, the day a second person
+          needs in or the day you reach part 101.
+        </p>
+      </div>
+    </div>
+
+    <p style="margin-top:24px">
+      There is no trial of Pro to forget to cancel, and no card on file on Free to charge.
+      Already have an account? <a href="https://saas.turboplm.com/login">Sign in</a>.
+      Would rather run it on your own hardware?
+      <a href="#selfhosted">The open-source version</a> is free too, with no limits at all.
+    </p>
+  </div>
+</section>
+
+
+<section class="alt" id="selfhosted">
+  <div class="wrap">
+    <div class="eyebrow">Self-hosted by design</div>
+    <h2>Your product data stays yours</h2>
+    <p class="lede">
+      Product structures, costs and supplier terms are among the most sensitive data a
+      hardware company has. TurboPLM is built to run where you decide.
+    </p>
+    <div class="grid g4">
+      <div class="card"><h3>No tenant, no metering</h3><p>Run it on a laptop, a NAS or a VM. No seat counts, no usage telemetry, no per-user tax on inviting a colleague.</p></div>
+      <div class="card"><h3>Plain Postgres</h3><p>Your data sits in a database you can query, dump and back up yourself — no proprietary store, no export fee.</p></div>
+      <div class="card"><h3>Open integration</h3><p>Scoped API keys, signed webhooks, ERP-shaped item and BOM export, CSV import that shows you what will change before it writes.</p></div>
+      <div class="card"><h3>Readable source</h3><p>TypeScript end to end, a documented contract between the API and the client, and a schema you can extend.</p></div>
+    </div>
+    <div class="demo-box" style="margin-top:30px">
+      <div>
+        <h3 style="margin-bottom:6px">Download and run it yourself</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0;max-width:56ch">
+          Clone the repository and bring the whole stack up with Docker Compose — the
+          application, the database and the CAD service, seeded with demo data, in a couple
+          of minutes.
+        </p>
+        <!-- Now genuinely open source (AGPL-3.0), so the word is used deliberately and is
+             accurate. It was FSL-1.1-MIT until 1 Aug 2026, which is source-available and NOT
+             open source — a distinction the self-hosting audience enforces, and getting it
+             wrong turns a launch thread into an argument about licensing. The licence is
+             named as well as described, because "open source" alone tells a careful reader
+             nothing about what they may actually do. -->
+        <p style="color:var(--muted);font-size:.88rem;margin:12px 0 0;max-width:56ch">
+          Open source under the GNU AGPL v3: read it, run it, change it, and use it for
+          anything at all. The one obligation is reciprocal — if you modify TurboPLM and offer
+          it to others over a network, your changes have to be published too.
+        </p>
+      </div>
+      <a class="btn btn-primary" href="https://github.com/horatiumm-creator/turboplm">Get it on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<section id="consulting">
+  <div class="wrap">
+    <div class="eyebrow">Services</div>
+    <h2>Get expert help</h2>
+    <p class="lede">
+      <strong>Every one of these works on your own installation just as well as on the hosted
+      version — including the one that puts it there.</strong> Nothing here is a route into our
+      servers: if you want the open-source build running on your hardware and never to speak to
+      us again, that is a service we sell, at a price, below.
+
+      <br /><br />
+      The software is free to run, and plenty of teams run it alone. These are for the times you
+      would rather not — a migration you only want to do once, an integration into systems that
+      are already load-bearing, or a second opinion on decisions that are painful to reverse.
+      Prices are starting points, not quotes: scope moves them, and you get a fixed number before
+      anything begins.
+    </p>
+    <div class="grid g4">
+      <div class="card"><div class="ico">↥</div><h3>BOM &amp; data migration</h3>
+        <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $2,500</div>
+        <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">about two weeks</div>
+        <p>Your existing part master and bills of material — spreadsheets, an old PLM, or exports from CAD — loaded, structured and reconciled, with the numbering and revision scheme agreed first. Into your own installation or the hosted version, whichever you have chosen.</p></div>
+      <div class="card"><div class="ico">◍</div><h3>ERP &amp; CAD integration</h3>
+        <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $6,000</div>
+        <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">scoped per system</div>
+        <p>Wiring TurboPLM to the systems around it: item and BOM sync, CAD exports, and the handoff to purchasing and production.</p></div>
+      <div class="card"><div class="ico">⚒</div><h3>Install it on your infrastructure</h3>
+        <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $4,000</div>
+        <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">one engagement</div>
+        <p>The open-source build, running on your servers, your cloud or your NAS — hardened with backups, TLS, accounts and access groups, then handed over with a runbook so you operate it without us. No licence, no seat count, no ongoing fee unless you want one.</p></div>
+      <div class="card"><div class="ico">◎</div><h3>PLM advisory</h3>
+        <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $1,200 / day</div>
+        <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">usually two to three days</div>
+        <p>Part numbering, revision strategy, release gates and change process — the decisions that are cheap to make once and expensive to revisit after three thousand parts carry them.</p></div>
+    </div>
+    <div class="demo-box" style="margin-top:30px">
+      
+    <!--
+      Support sits apart from the four engagements above because it is a different shape: a
+      standing relationship rather than a piece of work with an end.
+
+      The honesty at the top of it is deliberate and load-bearing. TurboPLM is AGPL, so every
+      fix is published — a self-hosting customer can always wait for the next release and take
+      it for nothing. A technical buyer works that out in about ten seconds, and a page that
+      implied otherwise would lose them at exactly the moment it was asking for money. Saying
+      it first turns the objection into a reason to believe the rest.
+    -->
+    <div class="card" style="margin-top:22px">
+      <h3 style="margin-bottom:4px">Keeping it running, on your infrastructure</h3>
+      <p style="margin-bottom:18px;max-width:78ch">
+        TurboPLM is open source, so every bug fix and security patch is published and yours
+        for free, whether you pay us or not — you are never buying access to a fix. What a
+        support agreement buys is <strong>priority, a response time you can plan around, and
+        somebody who performs the upgrade instead of writing you instructions.</strong>
+      </p>
+
+      <div class="grid g3" style="margin-top:0">
+        <div class="card">
+          <h3>Community</h3>
+          <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">Free</div>
+          <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">no agreement</div>
+          <p>GitHub issues, answered when we get to them. Every release, every fix and every
+          security patch, same as anyone. Plenty of teams need nothing else.</p>
+        </div>
+        <div class="card">
+          <h3>Supported</h3>
+          <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $750 / month</div>
+          <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">cancel any time</div>
+          <p>A reply within one working day. Your bugs triaged ahead of the queue. Security
+          patches flagged to you directly rather than found in a changelog, with upgrade notes
+          for your version. You run the upgrade; we tell you what is in it and what to watch.</p>
+        </div>
+        <div class="card">
+          <h3>Managed</h3>
+          <div style="font-weight:700;font-size:1.15rem;margin:2px 0 2px">from $1,500 / month</div>
+          <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">cancel any time</div>
+          <p>Everything above, and we do the work: scheduled upgrades performed on your
+          instance in a window you choose, your backups restored into a scratch database and
+          verified each quarter, and a same-day reply when something is wrong.</p>
+        </div>
+      </div>
+
+      <p style="color:var(--muted);font-size:.88rem;margin:18px 0 0;max-width:78ch">
+        What none of these cover: your hardware, your network, your own database tuning, and
+        code you have changed yourself. The licence lets you modify TurboPLM freely — but a
+        fork is a different product, and supporting one is a conversation rather than a plan.
+      </p>
+    </div>
+<div>
+        <h3 style="margin-bottom:6px">Start a conversation</h3>
+        <p style="color:var(--muted);font-size:.93rem;margin:0">
+          Tell us what you build and where your product data hurts. We will come back with
+          a straight answer on how we can help. No obligation.
+        </p>
+      </div>
+      <a class="btn btn-primary" href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="color:#fff;margin-bottom:12px"><span class="mark">T</span> TurboPLM</div>
+        <p style="max-width:42ch;font-size:.92rem;color:#9fb3cd">
+          Self-hosted product lifecycle management for teams that build physical things —
+          product structure, BOM, revisioning and engineering change control.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="#tour">Watch the tour</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#change">Change control</a>
+        <a href="#access">Access control</a>
+        <a href="#demo">Live demo</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://saas.turboplm.com/register">Start free</a>
+        <a href="#selfhosted">Self-hosted</a>
+      </div>
+      <div>
+        <h4>Services</h4>
+        <a href="#consulting">Consulting</a>
+        <a href="#consulting">Implementation</a>
+        <a href="#consulting">ERP &amp; CAD integration</a>
+        <a href="mailto:office@turboplm.com?subject=TurboPLM%20enquiry">Get in touch</a>
+        <a href="/unsubscribe">Unsubscribe from email</a>
+        <h4 style="margin-top:22px">Legal</h4>
+        <a href="/terms">Terms of service</a>
+        <a href="/privacy">Privacy notice</a>
+      </div>
+    </div>
+    <div class="foot-bot">
+      <!-- The operating company is named here, not only on the legal pages. A buyer's
+           finance team matches the name on a Stripe statement to the site they bought
+           from, and a merchant name appearing nowhere on turboplm.com is what turns that
+           into a chargeback enquiry. -->
+      <span>© 2026 TurboPLM</span>
+      <span>Open source under the GNU AGPL v3.</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
