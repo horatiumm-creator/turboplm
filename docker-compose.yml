@@ -56,7 +56,7 @@ services:
       # Role for self-signups: VIEWER keeps a public instance read-only.
       REGISTRATION_ROLE: ${REGISTRATION_ROLE:-VIEWER}
     ports:
-      - "8010:4000"
+      - "127.0.0.1:8010:4000"
     volumes:
       - turboplm-uploads:/app/uploads
     depends_on:
