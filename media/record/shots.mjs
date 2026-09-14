@@ -32,10 +32,13 @@ const SHOTS = [
   // Taller viewport: the part header, signature gate and access panel sit above the tab
   // strip, so at 900px the BOM tree is off-screen no matter how it is scrolled — the app
   // scrolls an inner container, not the window.
-  { file: 'part-bom.png', path: '/parts/1', wait: null, tab: 'eBOM', height: 1700 },
+  { file: 'part-bom.png', path: '/parts/1', wait: '.bom-tree tr.ant-table-row', tab: 'eBOM', height: 2600, element: '.ant-tabs-tabpane-active' },
   { file: 'dashboard.png', path: '/', wait: null, tab: null },
   { file: 'changes.png', path: '/ecns', wait: null, tab: null },
 ];
+
+// SHOTS=part-bom.png,dashboard.png captures only those files.
+const ONLY = process.env.SHOTS ? process.env.SHOTS.split(',') : null;
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
@@ -49,7 +52,7 @@ try {
   await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20000 });
   console.log('signed in as', EMAIL);
 
-  for (const shot of SHOTS) {
+  for (const shot of SHOTS.filter((s) => !ONLY || ONLY.includes(s.file))) {
     if (shot.height) await page.setViewportSize({ ...VIEWPORT, height: shot.height });
     else await page.setViewportSize(VIEWPORT);
     await page.goto(`${BASE}${shot.path}`, { waitUntil: 'networkidle' });
@@ -65,9 +68,12 @@ try {
       // spinner, which is a worse advertisement than no screenshot at all.
       await page.waitForTimeout(1200);
     }
+    if (shot.wait) await page.locator(shot.wait).first().waitFor();
     await page.waitForTimeout(600);
     const out = `${OUT}/${shot.file}`;
-    await page.screenshot({ path: out });
+    // The eBOM is framed on its own tab so the tree fills the image instead of the part header.
+    if (shot.element) await page.locator(shot.element).screenshot({ path: out });
+    else await page.screenshot({ path: out });
     console.log('captured', shot.file);
   }
 } finally {

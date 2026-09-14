@@ -91,20 +91,21 @@ function collectExpandableKeys(rows: TreeRow[]): Key[] {
  * column left out stays flexible and gets neither. Widths live here rather than on the
  * column definitions so they cannot drift out of step with what the resize hook restores.
  *
- * The totals are chosen to fit a laptop window without horizontal scrolling. Once a BOM
+ * They add up to 1116px, which fits the 1122px content area of a 1440px window with the
+ * sidebar open, so a read-only BOM needs no horizontal scrolling. Once a BOM
  * scrolls by default the right-hand columns are effectively hidden, and a reader who never
  * scrolls will not know Notes exists.
  */
 const BOM_DEFAULT_WIDTHS: Record<string, number> = {
-  part: 300,
-  findNumber: 80,
+  part: 330,
+  findNumber: 72,
   category: 120,
-  rev: 190,
-  quantity: 80,
-  uom: 70,
-  effectivity: 180,
-  refDesignators: 120,
-  notes: 160,
+  rev: 140,
+  quantity: 64,
+  uom: 60,
+  effectivity: 140,
+  refDesignators: 100,
+  notes: 90,
   actions: 150,
 };
 
@@ -590,6 +591,8 @@ export default function BomTab({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
           marginBottom: 16,
         }}
       >
@@ -598,7 +601,7 @@ export default function BomTab({
           editable{editable ? '' : ' when the revision is In Work'}; deeper levels come from each
           child&#39;s resolved revision.
         </Typography.Text>
-        <Space size={8}>
+        <Space size={8} wrap>
           {asOf && <Tag>effectivity filter active</Tag>}
           <DatePicker
             allowClear

@@ -275,7 +275,11 @@ describe('rule P4 — what a supplier may see', () => {
     );
     expect(line.myQuote.unitPrice).toBe(44.8);
 
-    const payload = JSON.stringify(detail.body);
+    // Timestamps are left out: "…T14:22:41.203Z" contains "41.2", which failed this test on
+    // any run whose clock landed on that second.
+    const payload = JSON.stringify(detail.body, (key, value) =>
+      /At$|Date$/.test(key) ? undefined : value
+    );
     // The competitor's identity, their price, the ranking and the buyer's target price are
     // all withheld.
     expect(payload).not.toContain('Nordic');

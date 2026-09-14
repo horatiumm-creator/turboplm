@@ -82,18 +82,26 @@ body,
    eye nothing to track. These rules add a vertical guide per indent level and
    tabular figures so Find # and Qty align as columns rather than drifting.
 --------------------------------------------------------------------------- */
-.bom-tree .ant-table-row-indent {
+/* antd floats the indent with height: 1px, and that height is what pushes the row's content
+   across. Overriding it made a zero-height float, which pushes nothing, so every level rendered
+   flat. The indent keeps antd's box; the guide is positioned against the cell instead. */
+.bom-tree td.ant-table-cell-with-append {
   position: relative;
-  height: 100%;
 }
 
 .bom-tree .ant-table-row-indent::before {
   content: '';
   position: absolute;
-  right: 0;
-  top: -12px;
-  bottom: -12px;
+  top: 0;
+  bottom: 0;
   border-left: 1px solid var(--bom-guide, rgba(140, 140, 140, 0.28));
+}
+
+/* A long name wraps beside the indent rather than dropping underneath it. */
+.bom-tree td.ant-table-cell-with-append > .ant-space {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 0;
 }
 
 /* Depth 0 has no parent to connect to. */
