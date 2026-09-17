@@ -10,8 +10,8 @@ shared drive.
 One click into a live instance seeded with a four-level quadcopter: released and
 in-work revisions, a change notice mid-flight, signatures, serialised build units.
 
-![A part in TurboPLM: revision B in work, managed by a change notice, with the
-signatures it needs before release and its access grants](media/screenshots/part-overview.png)
+![A released part in TurboPLM: revision A of an industrial camera, its access grants,
+and the start of its bill of materials](media/screenshots/part-overview.png)
 
 <sub>Below the fold on that same page: the bill of materials, with find numbers,
 quantities and each child resolved to its released revision —
