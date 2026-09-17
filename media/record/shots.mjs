@@ -19,6 +19,12 @@ const BASE = process.env.DEMO_URL || 'https://demo.turboplm.com';
 const EMAIL = process.env.DEMO_EMAIL || 'demo@turboplm.com';
 const PASSWORD = process.env.DEMO_PASSWORD || 'explore-turboplm';
 
+// 'dark' or 'light'. Written to localStorage before the app boots, which is where
+// ThemeContext reads it from; otherwise the app would follow the runner's system setting.
+const THEME = process.env.THEME || 'dark';
+// The part the two part shots use. Not every instance numbers its parts the same way.
+const PART_PATH = process.env.PART_PATH || '/parts/1';
+
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../screenshots');
 mkdirSync(OUT, { recursive: true });
 
@@ -26,13 +32,13 @@ mkdirSync(OUT, { recursive: true });
 const VIEWPORT = { width: 1440, height: 900 };
 
 const SHOTS = [
-  { file: 'part-overview.png', path: '/parts/1', wait: null, tab: null },
+  { file: 'part-overview.png', path: PART_PATH, wait: null, tab: 'eBOM' },
   // eBOM, not "Bill of Materials" — the tabs are cBOM / eBOM / mBOM, and a name that does
   // not match silently captures whatever tab was already open.
   // Taller viewport: the part header, signature gate and access panel sit above the tab
   // strip, so at 900px the BOM tree is off-screen no matter how it is scrolled — the app
   // scrolls an inner container, not the window.
-  { file: 'part-bom.png', path: '/parts/1', wait: '.bom-tree tr.ant-table-row', tab: 'eBOM', height: 2600, element: '.ant-tabs-tabpane-active' },
+  { file: 'part-bom.png', path: PART_PATH, wait: '.bom-tree tr.ant-table-row', tab: 'eBOM', height: 2600, element: '.ant-tabs-tabpane-active' },
   { file: 'dashboard.png', path: '/', wait: null, tab: null },
   { file: 'changes.png', path: '/ecns', wait: null, tab: null },
 ];
@@ -41,7 +47,10 @@ const SHOTS = [
 const ONLY = process.env.SHOTS ? process.env.SHOTS.split(',') : null;
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
+const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: THEME });
+await page.addInitScript((theme) => {
+  try { localStorage.setItem('turboplm.theme', theme); } catch { /* private mode */ }
+}, THEME);
 page.setDefaultTimeout(20000);
 
 try {
