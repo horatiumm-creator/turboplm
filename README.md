@@ -35,55 +35,6 @@ quantities and each child resolved to its released revision —
 > before putting it anywhere that matters.
 
 ---
-
-## Quick Start
-
-You need **Docker Desktop** (or Docker Engine + Compose v2). Nothing else — Node,
-Postgres and the CAD toolchain all live in containers.
-
-```bash
-git clone https://github.com/horatiumm-creator/turboplm.git
-cd turboplm
-cp .env.example .env          # sensible local defaults; edit only if you want email/OAuth
-docker compose up -d --build
-```
-
-Open **http://localhost:3010** and sign in with one of the seeded development accounts:
-
-| Email | Password | Role |
-|---|---|---|
-| `demo@turboplm.local` | `demo1234` | Engineer — full read/write |
-| `admin@turboplm.local` | `admin1234` | Admin — plus users, attributes, workflows, integrations |
-| `viewer@turboplm.local` | `viewer1234` | Viewer — read-only (all edit controls hidden) |
-
-> **Important:** those are **local development credentials only**, published here on
-> purpose. Never expose an instance that has them. For anything reachable from the
-> internet, start it with `SEED_DEMO_DATA=false` and `ALLOW_REGISTRATION=false`, then
-> create your first administrator explicitly:
->
-> ```bash
-> docker compose exec api npm run create-admin -- you@example.com 'a-long-strong-password' 'Your Name'
-> ```
-
-The database seeds itself on first start with a demo product: a **TurboDrone X1**
-quadcopter (27 parts, four BOM levels, released and in-work revisions, two process
-plans) plus a **TurboDrone X1 Pro** variant that shares subassemblies — so BOM compare,
-where-used and change management have real data to work on immediately.
-
-> **Tip:** Register your own account from the login page if you'd rather start clean.
-> New self-registered users get the **Viewer** (read-only) role by default — change that
-> with `REGISTRATION_ROLE=ENGINEER`, or set `ALLOW_REGISTRATION=false` to turn
-> self-registration off entirely.
-
-To stop, and to wipe everything including the database and uploaded files:
-
-```bash
-docker compose down          # stop
-docker compose down -v       # stop and delete all data
-```
-
----
-
 ## Features
 
 ### Product structure
@@ -297,6 +248,56 @@ docker compose down -v       # stop and delete all data
   and the ERP-shaped item/BOM extracts above.
 
 ---
+
+## Quick Start
+
+You need **Docker Desktop** (or Docker Engine + Compose v2). Nothing else — Node,
+Postgres and the CAD toolchain all live in containers.
+
+```bash
+git clone https://github.com/horatiumm-creator/turboplm.git
+cd turboplm
+cp .env.example .env          # sensible local defaults; edit only if you want email/OAuth
+docker compose up -d --build
+```
+
+Open **http://localhost:3010** and sign in with one of the seeded development accounts:
+
+| Email | Password | Role |
+|---|---|---|
+| `demo@turboplm.local` | `demo1234` | Engineer — full read/write |
+| `admin@turboplm.local` | `admin1234` | Admin — plus users, attributes, workflows, integrations |
+| `viewer@turboplm.local` | `viewer1234` | Viewer — read-only (all edit controls hidden) |
+
+> **Important:** those are **local development credentials only**, published here on
+> purpose. Never expose an instance that has them. For anything reachable from the
+> internet, start it with `SEED_DEMO_DATA=false` and `ALLOW_REGISTRATION=false`, then
+> create your first administrator explicitly:
+>
+> ```bash
+> docker compose exec api npm run create-admin -- you@example.com 'a-long-strong-password' 'Your Name'
+> ```
+
+The database seeds itself on first start with a demo product: a **TurboDrone X1**
+quadcopter (27 parts, four BOM levels, released and in-work revisions, two process
+plans) plus a **TurboDrone X1 Pro** variant that shares subassemblies — so BOM compare,
+where-used and change management have real data to work on immediately.
+
+> **Tip:** Register your own account from the login page if you'd rather start clean.
+> New self-registered users get the **Viewer** (read-only) role by default — change that
+> with `REGISTRATION_ROLE=ENGINEER`, or set `ALLOW_REGISTRATION=false` to turn
+> self-registration off entirely.
+
+To stop, and to wipe everything including the database and uploaded files:
+
+```bash
+docker compose down          # stop
+docker compose down -v       # stop and delete all data
+```
+
+---
+
+
 
 ## Architecture
 
