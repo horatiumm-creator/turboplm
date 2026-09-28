@@ -36,6 +36,7 @@ import type { NotificationItem, SearchHit, SearchResults } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { formatDate } from './meta';
 import { ThemeToggle } from './ThemeToggle';
+import { SponsorButton } from './SponsorButton';
 
 const { Sider, Header, Content } = Layout;
 
@@ -482,6 +483,7 @@ export default function AppLayout() {
                 allowClear
               />
             </AutoComplete>
+            <SponsorButton />
             <ThemeToggle />
             <Dropdown
               trigger={['click']}

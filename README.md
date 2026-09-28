@@ -30,6 +30,7 @@ quantities and each child resolved to its released revision —
 [![React 18](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev)
 [![Postgres 16](https://img.shields.io/badge/Postgres-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Sponsor](https://img.shields.io/badge/GitHub%20Sponsors-FF009D?logo=githubsponsors&logoColor=fff)](https://github.com/sponsors/horatiumm-creator)
 
 > **Pre-1.0.** It runs, and everything below works, but read the Deployment Notes
 > before putting it anywhere that matters.
