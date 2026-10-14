@@ -54,10 +54,9 @@ export function SponsorButton() {
           Why sponsorship
         </Typography.Title>
         <Typography.Paragraph type="secondary">
-          TurboPLM is free, AGPL and self-hosted — there is no licence to sell. Running it has
-          real costs all the same: the public demo and its database, and above all the time
-          that goes into security patches, upgrades and answering issues. Sponsorship is what
-          pays for that.
+          TurboPLM is free, AGPL and self-hosted — there is no licence to sell. Keeping it
+          going still costs: the time that goes into security patches, dependency upgrades,
+          and answering issues. Sponsorship is what pays for that.
         </Typography.Paragraph>
 
         <blockquote

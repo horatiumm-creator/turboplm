@@ -238,8 +238,8 @@
   ul.check li{position:relative;padding-left:26px;margin-bottom:9px;color:var(--muted);font-size:.94rem}
   ul.check li::before{content:"✓";position:absolute;left:0;top:-1px;color:var(--ok);font-weight:800}
 
-  /* demo callout */
-  .demo-box{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:24px;background:var(--bg);display:flex;gap:26px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+  /* feature callout */
+  .callout-box{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:24px;background:var(--bg);display:flex;gap:26px;flex-wrap:wrap;align-items:center;justify-content:space-between}
   .creds{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;background:var(--bg-alt);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}
   .creds div{white-space:nowrap}
 
@@ -263,13 +263,10 @@
       <a href="#capabilities">Capabilities</a>
       <a href="#change">Change control</a>
       <a href="#access">Access</a>
-      <a href="#demo">Live demo</a>
       <a href="#pricing">Pricing</a>
       <a href="#selfhosted">Self-hosted</a>
       <a href="#consulting">Consulting</a>
-      <!-- The one link on this page for someone who is already a customer. It goes to the
-           hosted product, NOT to the demo instance: a returning user typing their password
-           into a shared read-only demo is a support ticket that looks like a broken login. -->
+      <!-- The one link on this page for someone who is already a customer. -->
       <a href="https://saas.turboplm.com/login">Sign in</a>
     </nav>
   </div>
@@ -293,13 +290,13 @@
       follows the product past release, into what was built and what came back from the
       field. Start on ours in a minute, or run the whole thing on your own hardware.
     </p>
-    <!-- The primary action is starting, not looking. "Try the live demo" was the primary
-         button and it led to a read-only account on a shared instance — the most prominent
-         thing on the page asked people to browse someone else's data rather than open their
-         own workspace. The demo is still one click away, as the secondary. -->
+    <!-- One way in. The shared read-only demo was retired in October 2026: the most
+         prominent thing on the page used to ask people to browse someone else's data
+         instead of opening their own workspace, and the free tier does that job better —
+         it is the real product, and a worked example loads into it in one click. -->
     <div class="cta">
       <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
-      <a class="btn btn-ghost" href="#demo">Try the live demo</a>
+      <a class="btn btn-ghost" href="#start">See what you get</a>
       <a class="btn btn-ghost" href="#consulting">Get expert help</a>
     </div>
     <p class="hero-note">
@@ -373,8 +370,8 @@
     <p style="font-size:.88rem;color:var(--muted);margin-top:-4px">
       Recorded before the most recent additions, so materials planning, the document vault,
       redline review and item-level access are not in this cut — the
-      <a href="#capabilities">capabilities</a> above and the
-      <a href="#demo">live demo</a> below cover them.
+      <a href="#capabilities">capabilities</a> above cover them, and every one of them is
+      in the free tier.
     </p>
     <div class="video-wrap">
       <video controls preload="metadata" poster="poster.jpg" playsinline>
@@ -647,49 +644,44 @@
   </div>
 </section>
 
-<section id="demo">
+<section id="start">
   <div class="wrap">
-    <div class="eyebrow">Live demo</div>
-    <h2>Try it on real data</h2>
+    <div class="eyebrow">Start free</div>
+    <h2>Your own workspace, with a worked example in it</h2>
     <p class="lede">
-      A running instance, seeded with a four-level quadcopter product — two variants that
-      share subassemblies, released and in-work revisions, process plans, a declared
-      material catalog with one part deliberately left unspecified so the planning gap is
-      visible, drawings under vault control with live redline threads, serialised build
-      units with their as-built genealogy, field service records, and changes in flight.
-      Create an account and click around.
+      An empty PLM cannot show you very much — there is no revision history to read, no
+      "where used" to follow and no bill of materials to open. So a new workspace can load
+      a worked example in one click: a modular linear-motor conveyance system, 38 parts
+      deep, with a configurable bill of materials, a released change order, and a bearing
+      rail shared across every section so you can trace it upwards and see which assemblies
+      a change would touch. Then delete it and start on your own parts.
     </p>
-    <div class="demo-box">
+    <div class="callout-box">
       <div>
-        <h3 style="margin-bottom:6px">Create your own account</h3>
+        <h3 style="margin-bottom:6px">Open your own workspace</h3>
         <p style="color:var(--muted);font-size:.93rem;margin:0 0 16px;max-width:52ch">
-          Sign up with an email and password, or continue with Google. Accounts are
-          read-only, so you can explore the whole system without changing the shared
-          demo data.
+          Sign up with an email and password, or continue with Google. It is yours and
+          nobody else's — private, writable, and the same software the paid plan runs.
         </p>
-        <!-- "Sign up free" used to live here, pointing at the demo. It was the most
-             conversion-shaped phrase on the page attached to the one destination that is not
-             the product: a read-only account on an instance whose data everyone shares. The
-             label now says what the button actually does. Starting for real is #pricing. -->
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <a class="btn btn-primary" href="https://demo.turboplm.com/register">Create a demo account</a>
-          <a class="btn btn-ghost" href="https://demo.turboplm.com/login">Sign in to the demo</a>
+          <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
+          <a class="btn btn-ghost" href="https://saas.turboplm.com/login">Sign in</a>
         </div>
         <p style="color:var(--muted);font-size:.9rem;margin:14px 0 0;max-width:52ch">
-          Looking for your own private workspace instead?
-          <a href="#pricing">Start free</a> — nothing shared, nothing read-only.
+          Free for one person and up to 100 parts, with no card. The worked example fits
+          well inside that. <a href="#pricing">See the limits</a>.
         </p>
       </div>
       <ul class="check" style="margin:0">
         <li>No approval step — you are in immediately</li>
-        <li>Explore every module with real product data</li>
+        <li>Every module, nothing held back for the paid plan</li>
         <li>Nothing to install</li>
       </ul>
     </div>
 
     <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
       Prefer your own copy? <code>git clone</code>, <code>docker compose up -d --build</code>,
-      and you have the same thing on your laptop in a couple of minutes — demo data included.
+      and you have the same thing on your laptop in a couple of minutes — sample data included.
       <a href="#selfhosted">Get the source →</a>
     </p>
   </div>
@@ -697,10 +689,10 @@
 
 <!-- ===========================================================================
      PRICING
-     Sits between the demo and the self-hosted section on purpose: a reader who has
-     just been told the demo is read-only and shared needs the next thing they see to
-     be how to get one that is not, and a reader who then decides they would rather run
-     it themselves finds that immediately below.
+     Sits between the free-start and the self-hosted section on purpose: a reader who has
+     just been shown what the free workspace gives them needs the next thing they see to
+     be what it costs when they outgrow it, and a reader who then decides they would rather
+     run it themselves finds that immediately below.
 
      The price is stated in full, in the card, at full size. An earlier draft put the
      Pro offer in muted small print; the nav item that brings people here says
@@ -711,10 +703,9 @@
     <div class="eyebrow">Pricing</div>
     <h2>Free to start. 10 USD a month when you outgrow it.</h2>
     <p class="lede">
-      The <a href="#demo">live demo</a> is read-only and shared. This is the real thing:
-      your own workspace, your own parts, yours to change. Both plans are the same
-      software — every module, nothing held back for the paid one. The only differences
-      are the two limits below.
+      Your own workspace, your own parts, yours to change from the first minute. Both
+      plans are the same software — every module, nothing held back for the paid one. The
+      only differences are the two limits below.
     </p>
 
     <div class="grid g2">
@@ -726,7 +717,7 @@
           <li>One member — just you</li>
           <li>Up to 100 parts</li>
           <li>Every module, exactly as Pro has it</li>
-          <li>Your own private workspace, not the shared demo</li>
+          <li>Your own private workspace, writable from the first minute</li>
         </ul>
         <div style="margin-top:20px">
           <a class="btn btn-primary" href="https://saas.turboplm.com/register">Start free</a>
@@ -774,13 +765,13 @@
       <div class="card"><h3>Open integration</h3><p>Scoped API keys, signed webhooks, ERP-shaped item and BOM export, CSV import that shows you what will change before it writes.</p></div>
       <div class="card"><h3>Readable source</h3><p>TypeScript end to end, a documented contract between the API and the client, and a schema you can extend.</p></div>
     </div>
-    <div class="demo-box" style="margin-top:30px">
+    <div class="callout-box" style="margin-top:30px">
       <div>
         <h3 style="margin-bottom:6px">Download and run it yourself</h3>
         <p style="color:var(--muted);font-size:.93rem;margin:0;max-width:56ch">
           Clone the repository and bring the whole stack up with Docker Compose — the
-          application, the database and the CAD service, seeded with demo data, in a couple
-          of minutes.
+          application, the database and the CAD service, seeded with sample data, in a
+          couple of minutes.
         </p>
         <!-- Now genuinely open source (AGPL-3.0), so the word is used deliberately and is
              accurate. It was FSL-1.1-MIT until 1 Aug 2026, which is source-available and NOT
@@ -834,7 +825,7 @@
         <div style="color:var(--muted);font-size:.82rem;margin-bottom:10px">usually two to three days</div>
         <p>Part numbering, revision strategy, release gates and change process — the decisions that are cheap to make once and expensive to revisit after three thousand parts carry them.</p></div>
     </div>
-    <div class="demo-box" style="margin-top:30px">
+    <div class="callout-box" style="margin-top:30px">
       
     <!--
       Support sits apart from the four engagements above because it is a different shape: a
@@ -915,7 +906,7 @@
         <a href="#capabilities">Capabilities</a>
         <a href="#change">Change control</a>
         <a href="#access">Access control</a>
-        <a href="#demo">Live demo</a>
+        <a href="#start">See what you get</a>
         <a href="#pricing">Pricing</a>
         <a href="https://saas.turboplm.com/register">Start free</a>
         <a href="#selfhosted">Self-hosted</a>

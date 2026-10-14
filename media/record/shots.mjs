@@ -1,7 +1,8 @@
 /**
- * Capture README screenshots from the live public demo.
+ * Capture README screenshots from a running instance.
  *
- * Deliberately driven against demo.turboplm.com rather than a local instance: the README
+ * The public demo it used to drive was retired in October 2026, so this now points at a
+ * local instance by default. Set DEMO_URL to override. The README
  * points people at that URL, so a screenshot taken anywhere else is a promise the demo may
  * not keep. If the shot looks right, the thing the reader clicks through to looks the same.
  *
@@ -15,7 +16,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BASE = process.env.DEMO_URL || 'https://demo.turboplm.com';
+const BASE = process.env.DEMO_URL || 'http://localhost:3010';
 const EMAIL = process.env.DEMO_EMAIL || 'demo@turboplm.com';
 const PASSWORD = process.env.DEMO_PASSWORD || 'explore-turboplm';
 

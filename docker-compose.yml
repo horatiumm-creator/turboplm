@@ -73,7 +73,7 @@ services:
     volumes:
       - turboplm-uploads:/app/uploads
 
-  # Public marketing site for turboplm.com (the app itself lives on demo.turboplm.com).
+  # Public marketing site for turboplm.com (the hosted app is saas.turboplm.com).
   landing:
     build: ./landing
     container_name: turboplm-landing

@@ -5,10 +5,12 @@ materials, revisions with a lifecycle the server actually enforces, and engineer
 change control — for the BOMs and drawings currently living in a spreadsheet and a
 shared drive.
 
-### ▶ [Try it now — no signup](https://demo.turboplm.com)
+### ▶ [Start free — one person, 100 parts, no card](https://saas.turboplm.com/register)
 
-One click into a live instance seeded with a four-level quadcopter: released and
-in-work revisions, a change notice mid-flight, signatures, serialised build units.
+Open a private workspace and load a worked example into it in one click: a modular
+conveyance system 38 parts deep, with a configurable bill of materials, a released
+change order, and a shared bearing rail you can trace upwards through every assembly
+that uses it.
 
 ![A released part in TurboPLM: revision A of an industrial camera, its access grants,
 and the start of its bill of materials](media/screenshots/part-overview.png)
@@ -23,7 +25,7 @@ quantities and each child resolved to its released revision —
 |---|---|
 | **Hosted, free** | [saas.turboplm.com](https://saas.turboplm.com) — one person, 100 parts, no card. Unlimited team and parts is 10 USD/month for the whole organisation. |
 | **Self-hosted** | Clone this repository, `docker compose up`. Free, unlimited, your hardware, your database. See [Quick Start](#quick-start). |
-| **Just looking** | [demo.turboplm.com](https://demo.turboplm.com) — read-only, real data, nothing to install. |
+| **Just looking** | Start free above and load the worked example — a real workspace with real structure in it, nothing to install. |
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Node 20](https://img.shields.io/badge/Node-20-339933?logo=node.js&logoColor=white)](https://nodejs.org)

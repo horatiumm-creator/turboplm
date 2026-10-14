@@ -7,10 +7,9 @@ Credentials are **not** stored here. Supply an account on the target instance
 through the environment:
 
 ```bash
-docker run --rm --network edge \
-  --add-host "demo.turboplm.com:$(docker inspect tsm-caddy \
-     --format '{{.NetworkSettings.Networks.edge.IPAddress}}')" \
+docker run --rm --network turboplm_default \
   -v "$PWD/record:/work:ro" -v "$PWD/out:/out" \
+  -e TOUR_BASE="http://turboplm-web:80" \
   -e TOUR_EMAIL="you@example.com" \
   -e TOUR_PASSWORD="…" \
   -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
@@ -21,7 +20,9 @@ docker run --rm --network edge \
 ```
 
 Set `TOUR_BASE` to point at a different instance (defaults to
-`https://demo.turboplm.com`).
+`http://localhost:3010`). The public demo these were originally recorded against was
+retired in October 2026; bring the self-hosted stack up with `docker compose up -d` and
+record against that, or point at a SaaS org you have loaded the sample product into.
 
 Any account on the instance works. The script only navigates, opens tabs and
 scrolls — it never submits a form. A read-only account is therefore fine and

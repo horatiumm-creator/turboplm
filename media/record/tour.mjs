@@ -24,7 +24,7 @@
  */
 import { chromium } from 'playwright';
 
-const BASE = process.env.TOUR_BASE || 'https://demo.turboplm.com';
+const BASE = process.env.TOUR_BASE || 'http://localhost:3010';
 // Credentials come from the environment — never commit them:
 //   TOUR_EMAIL=you@example.com TOUR_PASSWORD='…' node tour.mjs
 const EMAIL = process.env.TOUR_EMAIL;

@@ -6,3 +6,9 @@ dist/
 
 # Runtime upload store — the seed regenerates its sample drawings on boot
 backend/uploads/
+
+# Prospect-specific seed scripts. This repository is PUBLIC: seed-excelsense.ts names a
+# real company and creates accounts on a shared password, so it must never be committed
+# here. Keep such scripts local, or put them in the private SaaS repo.
+backend/src/seed-*.local.ts
+backend/src/seed-excelsense.ts

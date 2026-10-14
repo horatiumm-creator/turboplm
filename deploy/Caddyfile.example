@@ -19,14 +19,17 @@
 	email you@example.com
 }
 
-# turboplm.com serves the marketing site; the application itself is on the
-# demo subdomain so the two never fight over routes like / or /login.
+# turboplm.com serves the marketing site; the application itself is on its own
+# hostname so the two never fight over routes like / or /login.
 turboplm.com, www.turboplm.com {
 	encode zstd gzip
 	reverse_proxy turboplm-landing:80
 }
 
-demo.turboplm.com {
+# Your own hostname for the app. The public demo that used to sit here was retired in
+# October 2026 — the hosted product is saas.turboplm.com and runs on Cloudflare, not
+# through this file.
+plm.example.com {
 	encode zstd gzip
 
 	# Uploaded CAD/document files can be large; allow room for them.

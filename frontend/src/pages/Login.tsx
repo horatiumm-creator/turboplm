@@ -146,11 +146,15 @@ export default function Login() {
         {/*
           ABOVE the form deliberately.
 
-          Someone arriving from turboplm.com's "Try the live demo" has been promised a
-          running instance full of real product data, and what they used to meet was an
-          empty email box. Registering first is friction at precisely the moment attention
-          is highest, and it asks for an email address before showing anything worth the
-          address. One click, no typing, straight into the quadcopter.
+          Someone opening a seeded instance has been promised real product data, and what
+          they used to meet was an empty email box. Registering first is friction at
+          precisely the moment attention is highest, and it asks for an email address
+          before showing anything worth the address. One click, no typing, straight into
+          the quadcopter.
+
+          Env-gated and off by default. It served the public demo at demo.turboplm.com,
+          which was retired in October 2026; it stays for self-hosters running the seeded
+          stack locally, where the same argument holds.
         */}
         {DEMO_LOGIN_ENABLED && (
           <>
