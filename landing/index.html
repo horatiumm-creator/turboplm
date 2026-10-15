@@ -240,9 +240,6 @@
 
   /* feature callout */
   .callout-box{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);padding:24px;background:var(--bg);display:flex;gap:26px;flex-wrap:wrap;align-items:center;justify-content:space-between}
-  .creds{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86rem;background:var(--bg-alt);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}
-  .creds div{white-space:nowrap}
-
   /* stack */
 
   footer{background:var(--bg-deep);color:#9fb3cd;padding:52px 0 34px;border-top:1px solid var(--line)}
@@ -447,6 +444,14 @@
           <div class="ico">◫</div>
           <h3>cBOM from CAD</h3>
           <p>Read the assembly structure straight out of a STEP file, match products to parts, and reconcile all three views: what was modelled, what engineering released, and what manufacturing consumes.</p>
+        </div>
+        <!-- The first thing most people need, and the thing the whole pitch assumes: the
+             BOM they already have is in a spreadsheet. Worth saying plainly that it comes
+             across, and that nothing is written until they have seen what it will do. -->
+        <div class="card">
+          <div class="ico">⇪</div>
+          <h3>Import the BOM you already have</h3>
+          <p>Upload the CSV your CAD system or your current spreadsheet produces — indented levels or parent/child, several levels at once. It reads the structure, shows you exactly what it will build, and refuses the whole import rather than half-applying a file with a bad row in it.</p>
         </div>
       </div>
     </div>
