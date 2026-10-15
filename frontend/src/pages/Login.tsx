@@ -152,9 +152,9 @@ export default function Login() {
           before showing anything worth the address. One click, no typing, straight into
           the quadcopter.
 
-          Env-gated and off by default. It served the public demo at demo.turboplm.com,
-          which was retired in October 2026; it stays for self-hosters running the seeded
-          stack locally, where the same argument holds.
+          Env-gated and off by default. It served the former hosted public demo
+          (now retired); it stays for self-hosters running the seeded stack locally,
+          where the same argument holds.
         */}
         {DEMO_LOGIN_ENABLED && (
           <>

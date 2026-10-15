@@ -75,7 +75,7 @@ body,
 }
 
 /* ---------------------------------------------------------------------------
-   BOM tree readability  (mirrors saas-turboplm)
+   BOM tree readability
    ---------------------------------------------------------------------------
    A bill of materials is read by following structure, not by reading rows. Ant's
    tree table indents with plain whitespace, which at four levels deep leaves the
