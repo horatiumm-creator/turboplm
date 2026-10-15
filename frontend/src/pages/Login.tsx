@@ -59,16 +59,21 @@ const SIGN_IN_ERRORS: Record<string, string> = {
 };
 
 /**
- * The shared read-only account on the public demo, or empty everywhere else.
+ * A shared read-only account for a public throwaway instance, or empty — which is now the
+ * default everywhere, including this repo's own docker-compose.
  *
- * Set as a build argument on the demo deployment ONLY. When it is empty — every other
- * build, including the SaaS — the button below does not render and this file behaves
- * exactly as it did before.
+ * Opt-in, as a build argument. When it is empty the button below does not render.
  *
- * A password in browser JavaScript is normally the defect. Here the account is a VIEWER,
- * `requireWriteRole` refuses every mutation from a VIEWER app-wide, and the entire point
- * is that any stranger may sign in with it. A credential you are inviting the public to
- * use is not a secret being leaked.
+ * A password in browser JavaScript is normally the defect. It is defensible ONLY when the
+ * account is a VIEWER (`requireWriteRole` refuses every mutation from a VIEWER app-wide)
+ * and you are actively inviting strangers to use it: a credential you are handing out is
+ * not a secret being leaked. Everything about that argument depends on both halves being
+ * true, so it is off unless you deliberately turn it on.
+ *
+ * It was on by default in docker-compose until October 2026, which was wrong twice over:
+ * it compiled a credential into every self-hoster's bundle, and it pointed at
+ * demo@turboplm.com while `seed.ts` creates demo@turboplm.local — so the button failed
+ * anyway. It existed for the public demo at demo.turboplm.com, which has been retired.
  */
 const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL as string | undefined;
 const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD as string | undefined;

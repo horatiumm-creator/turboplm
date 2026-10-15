@@ -87,14 +87,22 @@ services:
     build:
       context: ./frontend
       args:
-        # PUBLIC DEMO ONLY. A shared read-only VIEWER account so a visitor arriving from
-        # turboplm.com lands inside the seeded quadcopter instead of an empty login form.
-        # VIEWER cannot mutate anything (requireWriteRole), and the credential is meant to
-        # be used by strangers — that is what makes shipping it in the bundle correct here
-        # and wrong anywhere else. Unset in every other deployment, where the button then
-        # does not render at all.
-        - VITE_DEMO_EMAIL=demo@turboplm.com
-        - VITE_DEMO_PASSWORD=explore-turboplm
+        # The one-click demo login is OFF here, and this file is the reason it has to be.
+        #
+        # VITE_* values are compiled into the client bundle — they are public by
+        # definition. Setting them here baked `demo@turboplm.com / explore-turboplm` into
+        # the JavaScript of every self-hosted build, while the comment above them claimed
+        # they were "unset in every other deployment". They were not: this compose file IS
+        # every other deployment now. It was written when turboplm.com's public demo ran
+        # from it; that demo was retired in October 2026 and only self-hosters run it.
+        #
+        # The button was also broken: `seed.ts` creates demo@turboplm.local, not
+        # demo@turboplm.com, so clicking it failed against a freshly seeded stack.
+        #
+        # Left unset, Login.tsx does not render the button at all. If you are running a
+        # public, throwaway, read-only instance and want it, pass them at build time:
+        #   docker compose build --build-arg VITE_DEMO_EMAIL=… --build-arg VITE_DEMO_PASSWORD=…
+        # and point them at a VIEWER account you are happy for strangers to share.
     container_name: turboplm-web
     restart: unless-stopped
     logging: *default-logging
