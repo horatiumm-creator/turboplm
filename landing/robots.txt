@@ -5,16 +5,15 @@
 User-agent: *
 Allow: /
 
-# Reached only from a link in an email, and useful to exactly one recipient. There
-# is nothing sensitive in it, but it is not a page anyone should arrive at from a
-# search result, and it would dilute the handful of URLs that should rank.
-Disallow: /unsubscribe
-
-# The application itself. Both deployments are behind a sign-in screen, so a crawler
-# spends its budget on a login form and indexes nothing of value. saas.turboplm.com
-# additionally sends X-Robots-Tag: noindex at the edge; this is the same instruction
-# said earlier, to a crawler that has not requested the page yet.
-Disallow: /login
-Disallow: /register
+# /unsubscribe is deliberately NOT disallowed, despite being a page nobody should
+# arrive at from a search result. It carries <meta name="robots" content="noindex">,
+# and a crawler that is forbidden to fetch the page never reads that tag — the URL can
+# then still be listed, bare and snippet-less, which is the outcome the tag exists to
+# prevent. Blocking the crawl and asking for noindex are mutually exclusive; the tag is
+# the one that actually removes a page, so it wins and the crawl is allowed.
+#
+# /login and /register are not here either: they are on saas.turboplm.com, and robots.txt
+# only governs the host that serves it, so naming them here did nothing at all. That host
+# sends X-Robots-Tag: noindex, nofollow on everything, set by its Cloudflare Worker.
 
 Sitemap: https://turboplm.com/sitemap.xml
