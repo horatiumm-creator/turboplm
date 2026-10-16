@@ -12,12 +12,11 @@ conveyance system 38 parts deep, with a configurable bill of materials, a releas
 change order, and a shared bearing rail you can trace upwards through every assembly
 that uses it.
 
-![A released part in TurboPLM: revision A of an industrial camera, its access grants,
-and the start of its bill of materials](media/screenshots/part-overview.png)
+![A released part in TurboPLM: its bill of materials, with find numbers, quantities and
+each child resolved to its released revision](media/screenshots/part-bom.png)
 
-<sub>Below the fold on that same page: the bill of materials, with find numbers,
-quantities and each child resolved to its released revision —
-[screenshot](media/screenshots/part-bom.png).</sub>
+<sub>Captured from the seeded stack this repository ships — `docker compose up -d --build`
+and you have the same thing.</sub>
 
 **Three ways to run it**
 

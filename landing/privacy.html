@@ -83,7 +83,7 @@
 
     <h2>Which TurboPLM you are using</h2>
     <p>
-      Four different things carry the TurboPLM name, and they hold your data very
+      Three different things carry the TurboPLM name, and they hold your data very
       differently. This notice tells you which is which.
     </p>
     <div class="tbl-wrap">
@@ -138,8 +138,10 @@
       <li>When the account was created.</li>
     </ul>
     <p>
-      Sign-in to the hosted product is by email address and password. We do not currently
-      offer sign-in through Google or any other identity provider on saas.turboplm.com.
+      Sign-in to the hosted product is by email address and password, or by continuing with
+      Google. If you use Google, we receive your email address, name and Google account
+      identifier from them so the account can be matched to you; we never receive your Google
+      password. No other identity provider is offered.
     </p>
 
     <h3>What you put in</h3>
@@ -147,8 +149,10 @@
       Everything you create in the application: parts and their revisions, bills of material,
       manufacturing processes, engineering change requests and notices, requirements,
       projects, quality records, serial and lot records, cost figures, and files you upload —
-      drawings, CAD models, specifications, images. Uploaded files are stored on our server's
-      disk, not in a third-party object store.
+      drawings, CAD models, specifications, images. Uploaded files are stored in Cloudflare
+      R2, an object store, in a private bucket: the objects have no public URLs, are not
+      served through a CDN, and are readable only by the application using credentials held
+      as deployment secrets.
     </p>
     <p>
       Some of that is personal data about other people, because PLM is full of names: supplier
@@ -211,14 +215,14 @@
 
     <h2>Where it is hosted, and who else touches it</h2>
     <p>
-      The hosted product runs in Docker containers on a server operated by us — the
-      application, the Postgres database and the file storage are all on that one machine,
-      behind a reverse proxy that terminates TLS. Data is not spread across a cloud provider's
-      managed services.
+      The hosted product runs on Cloudflare: a Worker serves the interface and routes the API
+      to a container running the application, with TLS terminated at Cloudflare's edge. The
+      Postgres database is managed by Neon, and uploaded files are in Cloudflare R2.
     </p>
     <p>
-      Server location: Ontario, Canada. The hosted service runs on infrastructure we operate
-      there, not on a third-party managed platform.
+      This changed in October 2026. Until then the service ran in Docker containers on a
+      single machine operated by us in Ontario, Canada; that machine no longer serves it, and
+      the data was migrated. Both providers are named in the table below.
     </p>
     <p>These are the only third parties that process data for us:</p>
     <div class="tbl-wrap">
@@ -228,6 +232,16 @@
         </thead>
         <tbody>
           <tr>
+            <td>Cloudflare</td>
+            <td>Running the application and storing uploaded files (R2)</td>
+            <td>Everything you put into the hosted product, including uploaded drawings and CAD models, plus the usual request metadata such as IP address</td>
+          </tr>
+          <tr>
+            <td>Neon</td>
+            <td>Running the Postgres database</td>
+            <td>Everything the application stores: your parts, bills of material, change records, account details and audit trail</td>
+          </tr>
+          <tr>
             <td>Stripe</td>
             <td>Taking payment for the Pro plan</td>
             <td>Your billing email and card details, entered directly with them; the name of your organisation</td>
@@ -236,11 +250,6 @@
             <td>Microsoft</td>
             <td>Sending invitation and notification email</td>
             <td>The recipient's email address and the contents of that email</td>
-          </tr>
-          <tr>
-            <td><span class="todo">operated by us, in Ontario, Canada</span></td>
-            <td>Running the server</td>
-            <td>Everything stored, at rest on their infrastructure</td>
           </tr>
         </tbody>
       </table>
@@ -259,12 +268,15 @@
 
     <h2>Backups</h2>
     <p>
-      The database and the uploaded files are dumped to disk on the same server once a day,
-      and those dumps are deleted after 14 days. That is the whole backup arrangement, stated
-      plainly because it matters to two different questions: how much you would lose in a
-      failure, and how long a deletion takes to become total. Data you ask us to delete is
-      gone from the live database immediately and disappears from the last backup within 14
-      days.
+      Since the move to Cloudflare and Neon in October 2026, backups are the providers' own:
+      Neon keeps point-in-time history for the database, and uploaded files live in R2. The
+      daily dump-to-local-disk described here previously no longer exists, because the server
+      it ran on no longer serves the product. Retention window:
+      <span class="todo">to be confirmed against the Neon plan</span>. This matters to two
+      different questions — how much you would lose in a failure, and how long a deletion
+      takes to become total — so it is stated plainly rather than glossed. Data you ask us to
+      delete is gone from the live database immediately and disappears from point-in-time
+      history once that window has passed.
     </p>
 
     <h2>How long we keep things</h2>

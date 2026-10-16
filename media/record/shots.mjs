@@ -16,9 +16,15 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BASE = process.env.DEMO_URL || 'http://localhost:3010';
-const EMAIL = process.env.DEMO_EMAIL || 'demo@turboplm.com';
-const PASSWORD = process.env.DEMO_PASSWORD || 'explore-turboplm';
+// Defaults match what `backend/src/seed.ts` actually creates (viewer@turboplm.local, a
+// VIEWER — read-only is exactly right for screenshots). They used to point at the public
+// demo's account, which was retired in October 2026: after the BASE moved to a local
+// seeded stack the credentials were left behind, so the script signed in with an account
+// that instance never creates and died at the form. SHOTS_* overrides; TOUR_* is accepted
+// for continuity with tour.mjs.
+const BASE = process.env.SHOTS_BASE || process.env.TOUR_BASE || 'http://localhost:3010';
+const EMAIL = process.env.SHOTS_EMAIL || process.env.TOUR_EMAIL || 'viewer@turboplm.local';
+const PASSWORD = process.env.SHOTS_PASSWORD || process.env.TOUR_PASSWORD || 'viewer1234';
 
 // 'dark' or 'light'. Written to localStorage before the app boots, which is where
 // ThemeContext reads it from; otherwise the app would follow the runner's system setting.
