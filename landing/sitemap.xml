@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  The three pages that should rank, on the apex host, at their extensionless URLs.
+  The one page that should rank, on the apex host, at its extensionless URL.
 
-  Extensionless because that is the URL nginx.conf is built to serve (`try_files $uri
-  $uri.html`) and the one that goes into emails and supplier questionnaires. Listing
-  /terms.html here instead would advertise a second URL for the same page and split
-  the signals between them.
+  Extensionless because that is what Cloudflare Pages serves — /terms.html 308s to
+  /terms — and the form that goes into emails and supplier questionnaires. Listing the
+  .html URL here as well would advertise a second URL for the same page and split the
+  signals between them.
 
-  /unsubscribe and /404.html are deliberately absent: one is transactional, the other
-  is not a page.
+  /terms and /privacy were removed on 2026-10-15: both carry
+  <meta name="robots" content="noindex">, and submitting a noindex URL in a sitemap is
+  reported by Search Console as an error. /unsubscribe and /404.html are absent for
+  their own reasons: one is transactional, the other is not a page.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
