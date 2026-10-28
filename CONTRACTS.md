@@ -1685,3 +1685,237 @@ Product: **TurboDrone X1** quadcopter — top assembly with rev A RELEASED and r
 mechanical/electrical/purchased/raw-material leaves), realistic part numbers/names/quantities,
 refDesignators on electrical items, a mix of RELEASED and IN_WORK leaf revisions, process
 plans with operations + operation materials for the battery pack and the top assembly.
+
+## AI — AI-assisted change management
+
+Three feature endpoints in `routes/ai.ts`, plus `lib/ai.ts` as the only place this product
+talks to a language model, and the credential endpoints that decide who pays for it.
+
+A key can come from either of two places, and `GET /ai/capabilities` is therefore answered PER
+CALLER rather than per deployment: the caller's own key if they have one, otherwise the
+deployment's `ANTHROPIC_API_KEY`. With neither, the feature does not exist for that person —
+capabilities says so and the UI renders nothing, the same contract the sign-in buttons have
+(`GET /auth/providers`: a provider nobody configured is never rendered). So `configured` means
+"this caller can use it", not "the operator turned it on": one person on an instance may have a
+key and the next may not, and the question stopped being one about the environment with the
+same answer for everybody.
+
+| Method/Path | Body → Response |
+|---|---|
+| GET /ai/capabilities | → {configured, source, ownKey, canStoreKeys, model, features} — answers WITHOUT a key |
+| PUT /ai/key | {provider, apiKey} → {stored, provider, hint, verified, reason} |
+| DELETE /ai/key | → 204. The caller's own. |
+| DELETE /ai/key/:userId | → 204. ADMIN only, clear-only (rule AI5). |
+| POST /ai/ecns/:id/narrative | → {narrative, model, paidBy, inputTruncated, brief, advisory} |
+| POST /ai/draft-change-order | {description} → {draft, discardedPartNumbers, candidatesConsidered, model, paidBy, advisory} |
+| POST /ai/ecns/:id/suggest-reviewers | → {suggestions, reasoning, evidence, model, paidBy, advisory} |
+
+### AI1 — The model explains retrieved data. It never supplies a fact.
+Everything is given data already read from this instance's own database and asked to EXPLAIN
+it. It is never asked for an engineering fact, a quantity, a cost, or a judgement the database
+could have answered. That is not squeamishness: this codebase refuses to produce numbers it
+cannot stand behind — a cost roll-up goes null rather than smaller and names the parts that
+made it incomplete (rule T8), reconciliation reports `QTY_MISMATCH` rather than splitting the
+difference (rule C5), a roll-up that lost a contributor to an access rule reports
+`redactedCount` rather than a total that reads complete (rule X4) — and a feature that invented
+an impact assessment would invert all of it on the screen where the stakes are highest.
+`AI_GROUND_RULES` states the prohibitions in the prompt; the checks below are what enforce
+them, because **a prompt is a request, not a constraint**.
+
+- **Part numbers are checked, not trusted.** `draft-change-order` retrieves candidate parts
+  under the caller's ACL filter (rule X2) and the model may only choose from them; anything
+  else is dropped and reported in `discardedPartNumbers`. Part-number formats are guessable
+  (rule 6), so a model asked to fill that field invents numbers that look exactly like this
+  instance's own — and a plausible wrong part number in a change order is worse than a blank
+  field, because it gets accepted.
+- **Suggested people are resolved back to real users.** A name that matches nobody in the
+  evidence is dropped rather than offered as a reviewer.
+- **An unparsable answer is a 502**, never blank fields passed on to a form.
+- **The facts come back with the answer.** `narrative` returns the whole `brief` it was written
+  from, and `suggest-reviewers` returns the `evidence` counts. A summary the reader cannot
+  check is a claim; next to the data it is a reading aid. Every response carries
+  `advisory: true`.
+
+### AI2 — Redaction happens before the prompt exists
+The change brief is built with the CALLER's access (rule CB4), so a part or product they may
+not see never reaches the prompt and therefore cannot leak through the answer. Restricted
+products are still COUNTED in the prompt ("hidden from this reader"), so the model cannot
+describe the change as safer than it is. **Asking a model to keep a secret is not an access
+control.**
+
+Note that the engineer's own description IS echoed verbatim into the `draft-change-order`
+prompt, as it must be — it is their text. Only the candidate list is ACL-derived.
+
+### AI3 — It costs money, so it is gated twice and metered
+`requireAi()` runs in the route BEFORE the allowance is spent, and that ordering is the reason
+the check exists in the route as well as in `lib/ai.ts`. Without it a request from somebody
+with no key still fails — the lib refuses too — but fails having consumed one of the 20 calls
+an hour, locking a user out of a feature they never got to use. The allowance is per user AND
+per feature, and low on purpose: every call is billed to somebody.
+
+`suggest-reviewers` answers with no model call at all when there are no candidates: nothing to
+summarise, and a model handed an empty list writes a paragraph about how it cannot help.
+
+### AI3a — Frontend
+Every AI control is rendered only when `GET /ai/capabilities` reports the feature, so somebody
+with no key available to them sees no AI at all rather than buttons that 409. Per caller, not
+per instance: the promise has to hold separately for each person now that one of them may have
+a key and the next may not.
+
+`components/AiProvenance.tsx` labels every answer with the model, an `advisory` tag, and whose
+account paid — a reader is entitled to know what wrote it, and the person pressing the button
+is entitled to know whose provider account just spent money, since the same button can charge
+the deployment's key for one person and the engineer themselves for the next. `paidBy` is
+nullable and a null omits that tag rather than guessing: naming the wrong payer would send
+somebody looking for the spend in an account that never saw it.
+
+`pages/Profile.tsx` with `components/AiKeyCard.tsx` is where a person adds, replaces or
+removes their own key, and where the save-time check reports its three-valued answer (rule
+AI5). The stored key is never rendered, only its last four characters. `pages/UsersAdmin.tsx`
+carries the ADMIN revoke control, worded to say plainly that it cannot be read and cannot be
+undone.
+
+- `components/ecn/ChangeBriefCard.tsx` — the brief, which loads on its own and needs no key,
+  with "Explain this change" as a button because each press is billed. The narrative renders
+  ABOVE the figures it was written from and says so, and the table stays on screen: a summary
+  the reader cannot check is a claim, next to the data it is a reading aid. It sits above the
+  existing line-level "Change impact" card, since "what does this reach" is asked first.
+- `pages/EcnDetail.tsx` reviewers card — "Suggest" shows the proposals with the recorded counts
+  each was made from, and assigns nobody. The reader adds whoever they agree with.
+- `pages/EcnList.tsx` new-change modal — describe the change in a sentence and the draft fills
+  the form, which the engineer then edits; nothing is saved by the draft call. Anything the
+  model could not resolve, and any part number it named that does not exist, is shown rather
+  than quietly dropped.
+
+### AI4 — No SDK, and nothing of the upstream response is echoed
+The Messages API is one POST, so it uses plain `fetch` — a provider SDK would be a dependency
+earning nothing, and the Google OAuth callback next door already speaks to its provider the
+same way, which is what makes it testable (the suite stubs `fetch` and drives the real route).
+Upstream error bodies are logged and never returned: they can quote the request back, and the
+request carries this instance's product data. 429 and everything else is a 503, because the
+request was fine and the service was not. Input is capped at 60k characters and truncation is
+reported in `inputTruncated`, so a narrative written from a partial brief never reads as though
+it saw everything.
+
+A rejected key is blamed on whoever owns it. 401/403 on the DEPLOYMENT key is a 502 naming
+`ANTHROPIC_API_KEY`, because only an operator can fix it; on a USER's key it is a 400 saying
+the provider rejected your API key and to check it in your profile. Naming an environment
+variable the caller cannot see would send them looking for an administrator instead of fixing
+their own key, and naming their key for an operator's mistake would do the reverse.
+
+One adapter per provider in `lib/ai.ts` (`ANTHROPIC`, `OPENAI`), each fixing its own endpoint,
+auth header, request shape and response shape. **The endpoint is never taken from input.** A
+bring-your-own-key feature that also accepted a base URL would let a user point this product's
+server at a host of their choosing with a credential attached, which is server-side request
+forgery that the victim pays for.
+
+### AI5 — A key belongs to the person, and this product's job is custody
+Rule AI3's gating was about an operator's budget. Bring-your-own-key makes the credential
+somebody's personal property, billed to their account, and the rules change accordingly.
+
+- **Encrypted, bound to its row.** `lib/secretBox.ts`: AES-256-GCM, a key derived per purpose
+  by HKDF from `AI_KEY_ENCRYPTION_KEY`, and the AAD binds every ciphertext to
+  `purpose|column|rowId`. The invariant is NOT "nobody can read it" — a credential does not
+  have to be read to be stolen, it has to be USED — so a value copied into another user's row
+  fails its authentication tag rather than spending that key. Ciphertexts carry a FINGERPRINT
+  of the secret, not a position in a list, so rotation re-encrypts on next write instead of
+  invalidating everything.
+- **No key, no custody.** With `AI_KEY_ENCRYPTION_KEY` unset, `PUT /ai/key` is a 409. Storing a
+  third party's paid credential under something weaker — the session secret, say — is worse
+  than declining, and `lib/config.ts` already made this call once by refusing to start on a
+  missing, too-short or still-default `JWT_SECRET` rather than signing cookies with it anyway.
+- **It never comes back out.** No endpoint returns a stored key, not the owner's and not
+  anybody's. `aiKeyHint` keeps the last four characters for recognition and that is all that is
+  ever displayed, which is also why `validateKeyFormat` runs BEFORE storage: without it the
+  tail of a mistyped password, or of a pasted `ANTHROPIC_API_KEY=sk-ant-…` line, ends up
+  displayed and stored.
+- **An ADMIN may revoke, never read.** `DELETE /ai/key/:userId` exists because a `User` row
+  survives offboarding by design — the foreign keys pointing at it restrict deletion, so a
+  departed engineer is moved to VIEWER instead of being removed and can no longer clear the
+  key themselves. Without this the credential sits in the database for ever with nobody able
+  to remove it. It does not report whether there was one: "who has a key" is not published to
+  the instance, because `GET /users` is read by the reviewer pickers too.
+- **Validation on save REPORTS; it does not gate.** `verifyCredential` makes one 1-token call
+  and answers three ways: accepted, rejected, or could-not-tell (429, 5xx, DNS, timeout). The
+  key is stored in ALL THREE cases and the person is told which they got. Gating on it would
+  let a provider outage, or a 429 on a busy account, stop somebody saving a key that is
+  perfectly good — this product second-guessing the owner of a credential on evidence it admits
+  it could not gather. It uses its own short timeout, not the sixty seconds a model gets to
+  write prose: somebody is waiting at a form.
+- **A read-scoped API key can neither store nor spend one.** `middleware/rbac.ts` exempts
+  `/ai/key` and the three feature POSTs from the write guard only when `!req.apiKeyAuth` — the
+  same condition `/notifications/read` already carries. `middleware/apikey.ts` maps a read key
+  to role VIEWER acting as its creating user, so without that condition a key issued for
+  reading could write its owner's credential and then spend it.
+- **Never in the audit trail.** `middleware/audit.ts` must redact by substring and suffix
+  across nested bodies, not by the exact-match set of four names it sanitizes today
+  (`password`, `passwordHash`, `token`, `secret`). That set does not contain `apiKey`, so as it
+  stands the body of `PUT /ai/key` would be written to `AuditLog` verbatim — fixing the
+  sanitizer is part of this feature, not a follow-up.
+
+## CB — The change brief (`GET /ecns/:id/change-brief`)
+
+What a change actually reaches, computed from this instance's own data. The question an
+engineer asks before releasing a change is "what does this break?", and answering it meant
+opening five screens and holding the result in your head: where-used for the products, build
+units for what has already shipped, traceability for the requirements, and quality for whatever
+is open against the part. This joins them once.
+
+**Added alongside `GET /ecns/:id/impact`, not replacing it.** They answer different questions
+and both are useful. `/impact` is about LINES — which BOM lines call this part out, with the
+find number and quantity — which is what you need while editing a structure, and one level is
+correct for that. The brief is about CONSEQUENCES, and one level is badly wrong for it: an
+impact entry's `usedIn` is the part's one-level where-used list, so a screen whose whole job is
+"what does this change break?" shows the sub-assemblies and never the products those
+sub-assemblies go into. The product is the thing a change breaks.
+
+The upward walk belongs in `lib/whereUsed.ts`, shared with the where-used reads, rather than
+growing a second and shallower answer beside them.
+
+### CB1 — Every figure is retrieved, never inferred
+This is the contract of `lib/changeBrief.ts` and the reason the AI narrative (rule AI1) is
+allowed to exist at all: the model is handed this brief and asked to EXPLAIN it, never to
+supply a fact. Where the brief cannot answer completely it says so — a note, a null, an empty
+list — in the same spirit as the cost roll-up returning a null total rather than a plausible
+smaller one (rule T8).
+
+Per item: `part`, `fromRevision`/`toRevision`, `products` with `redactedProducts`,
+`releasedAssemblies` (the committed structures the part appears in — see CB2 for why this is
+not "the assemblies holding the old revision"), `builtUnits` with `shippedCount`,
+`requirements` traced to the part (which a change may invalidate), `openNcrs`, and `truncated`
+when the upward walk hit its depth cap so `products` may be short. Then `totals` across every
+item.
+
+Both capped collections disclose their cap in `notes` rather than silently sampling:
+`builtUnits` and `releasedAssemblies` each stop at 25 and push a note saying the list is
+partial. `shippedCount` is counted separately from the truncated list, because the number that
+decides whether a change needs a field action must never be a sample (CB3).
+
+### CB2 — `products` is the broad question, and it is not narrowed to the revision
+`products` is the upward walk from the changed PART, not from the revision being changed, and
+each entry carries its `level` and the `path` back down to the change so the chain can be read
+back. Narrowing the first hop to the exact revision answers "who demonstrably holds the thing
+we are replacing", which is a different question and the wrong one here: an in-work assembly
+holds nothing yet and picks the change up the moment it is released, so a narrowed brief
+silently omits every draft product — which, on a change being assessed BEFORE release, is most
+of them.
+
+A BOM child resolves to its latest released revision at read time (rule 5) and this build
+keeps no per-line revision pin, so there is no "assemblies holding the old revision" figure to
+report and the brief must not imply one. It answers the broad question only.
+
+### CB3 — Numbers that stop a release are never samples
+`builtUnits` is capped at 25 per item and says so in `notes` when it truncates, but
+`shippedCount` is its own `count()` query. A change with 40 shipped units must not report the
+25 that happen to be newest: the figure deciding whether a field action is needed cannot be a
+sample. `SCRAPPED` units are excluded — built and thrown away is not something a change must be
+reconciled against, and counting them would inflate exactly that figure.
+
+### CB4 — Totals are deduplicated; restricted products are counted, not dropped
+Two parts on one ECN usually share products, and "12 products affected" when it is the same
+three counted four times is either discounted or panicked at. Totals dedupe by id.
+
+Rule X4 applies with its direction mattering more than usual: a brief that silently DROPPED a
+restricted product would report a change as **safe when it is not**, which is the one error
+this screen must not make. So they are counted in `redactedProducts` and never named, and the
+bulk check is `visibleIds` from `lib/acl.ts` (rule X2) rather than a query per product.

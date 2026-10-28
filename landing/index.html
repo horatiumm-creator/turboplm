@@ -163,7 +163,12 @@
   .nav-links{display:flex;gap:22px;align-items:center;font-size:.94rem}
   .nav-links a{color:var(--muted)}
   .nav-links a:hover{color:var(--text);text-decoration:none}
-  @media(max-width:760px){.nav-links{display:none}}
+  /* 760 until the AI link made a ninth item. Measured: the row needs 825px of viewport to
+     sit inside the wrap, so below that it overflowed the sticky header and gave the whole
+     page a horizontal scrollbar. Hiding it is what this rule already does for narrow
+     widths, and every link here is also in the footer, so nothing becomes unreachable.
+     Re-measure this number before adding a tenth item. */
+  @media(max-width:830px){.nav-links{display:none}}
 
   /* buttons */
   .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent;cursor:pointer;transition:.15s}
@@ -259,6 +264,7 @@
       <a href="#tour">Tour</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#change">Change control</a>
+      <a href="#ai">AI assist</a>
       <a href="#access">Access</a>
       <a href="#pricing">Pricing</a>
       <a href="#selfhosted">Self-hosted</a>
@@ -598,6 +604,91 @@
   </div>
 </section>
 
+<!-- ===========================================================================
+     AI SITS AFTER CHANGE CONTROL, never before it. All three features act on a change
+     order, so a reader who has not yet been told what a change is, or which rules hold it,
+     would be reading about help with an object they have not met.
+
+     The headline is the commercial fact rather than the capability. The hosted service
+     holds no provider key of its own — checked against the deployed Worker's secret list,
+     which carries AI_KEY_ENCRYPTION_KEY and no ANTHROPIC_API_KEY — and that absence is the
+     only thing that makes "nothing is resold" safe to print. Set a platform key on the
+     hosted deployment one day and that sentence becomes false; this section changes in the
+     same commit.
+
+     What this does NOT say, deliberately: that there is no usage cap. There is one — a flat
+     hourly ceiling per person per feature, because each call is billed to somebody. It is
+     described as what it is rather than denied, since a buyer who meets a 429 we claimed
+     did not exist has caught the page lying about the one thing this section is selling.
+
+     And it is not "AI included". With no key the endpoints refuse and the controls do not
+     render, so a reader who signed up expecting bundled AI has been mis-sold.
+
+     "Explain a change" says the assemblies that USE the part, not the assemblies "pinned to
+     the revision being replaced". The stronger sentence was in the first draft of this
+     section and it was wrong: a BOM line here names a part, not a child revision, so the
+     database holds no such pin and the brief deliberately refuses to report one (CONTRACTS
+     rule CB2). Selling a precision the product declines to claim is the one failure this
+     whole section is arguing the product does not commit.
+     =========================================================================== -->
+<section id="ai">
+  <div class="wrap">
+    <div class="eyebrow">Bring your own key</div>
+    <h2>AI that explains a change, on your own API key</h2>
+    <p class="lede">
+      Three features sit inside change control, and all three run on a key you bring. The
+      hosted service holds no provider key of its own, so nothing is resold, there is no AI
+      tier to buy and no per-seat AI charge. You paste a key from Anthropic or OpenAI into
+      your profile and the features turn on for you alone — your provider account, your
+      bill, your rate limits, your own relationship with the model vendor.
+    </p>
+    <div class="grid g2">
+      <div class="card">
+        <h3>What it does</h3>
+        <ul class="check">
+          <li><strong>Explain a change.</strong> A written summary of what a change order touches — the products it reaches however deep in the bill of materials, the released and in-review assemblies that use the part, what has already been built and shipped, and the requirements it may invalidate. The figures it was given stay on screen beside it.</li>
+          <li><strong>Draft a change order.</strong> Describe the change in a sentence and the form fills in — title, description, priority and candidate affected parts. Nothing is written until you save it yourself.</li>
+          <li><strong>Suggest reviewers.</strong> Who should review, drawn from the recorded work on the affected parts, with the counts it reasoned from shown next to each name. It assigns nobody.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Your key, not ours</h3>
+        <ul class="check">
+          <li>Encrypted before it is stored, and never displayed again beyond its last four characters</li>
+          <li>An administrator can revoke a key — a departed colleague's, for instance — but nothing in the product reads one back out</li>
+          <li>Saving a key tells you what the provider said about it, and stores it either way: a provider that was rate-limiting or slow to answer is not a bad key</li>
+          <li>The one limit we impose is a flat hourly ceiling on AI requests per person, so a loop cannot run up your bill — not a quota you can buy more of</li>
+          <li>Running it on your own hardware, you can set one Anthropic key for the whole deployment instead — and a person's own key is still used ahead of it</li>
+          <li>With no key configured the AI controls do not appear at all. Nothing else in TurboPLM depends on them</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Asked to explain, never asked to know</h3>
+        <ul class="check">
+          <li>The model is only ever handed data already read from your database and asked to put it into prose. It is never asked for an engineering fact, a quantity or a cost — nor for what is “typically” true of a change like this one</li>
+          <li>Part numbers it names are checked against real parts. Anything it invented is kept out of the draft and listed to you, because a model reaching outside the list is something to know before trusting the rest of it</li>
+          <li>Suggested reviewers are resolved back to real people, so a confidently invented colleague never becomes a suggestion</li>
+          <li>Every answer carries the name of the model that wrote it and is marked advisory</li>
+          <li>A brief too large to send whole is cut, and the answer says so rather than reading as though it saw everything</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>It only sees what you can see</h3>
+        <ul class="check">
+          <li>The brief is assembled with the access of the person asking, so a product they cannot open never reaches the prompt — asking a model to keep a secret is not an access control</li>
+          <li>What is hidden from them is <em>counted</em> and reported as a count, never quietly left out: a summary that dropped one would describe a dangerous change as safe</li>
+          <li>A draft can only propose parts that the person asking is allowed to see</li>
+          <li>These calls read your product data and write none of it — the draft fills a form you edit, the reviewer list is a proposal you act on</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top:20px;font-size:.88rem;color:var(--muted)">
+      The hosted service and the open-source build work the same way here: there is no AI
+      plan to buy and nothing to switch on — you set a key, or you do not.
+    </p>
+  </div>
+</section>
+
 <section class="alt" id="access">
   <div class="wrap">
     <div class="eyebrow">Need to know</div>
@@ -911,6 +1002,7 @@
         <a href="#tour">Watch the tour</a>
         <a href="#capabilities">Capabilities</a>
         <a href="#change">Change control</a>
+        <a href="#ai">AI assist</a>
         <a href="#access">Access control</a>
         <a href="#start">See what you get</a>
         <a href="#pricing">Pricing</a>

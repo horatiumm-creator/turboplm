@@ -14,12 +14,13 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, BulbOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import * as api from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import AiProvenance from '../components/AiProvenance';
 import { ApiError } from '../api/client';
-import type { EcnPriority, EcnStatus, EcnSummary } from '../api/types';
+import type { AiCapabilities, AiPaidBy, EcnPriority, EcnStatus, EcnSummary } from '../api/types';
 import {
   ECN_PRIORITY_OPTIONS,
   ECN_STATUS_OPTIONS,
@@ -49,6 +50,70 @@ export default function EcnList() {
   const [pageSize, setPageSize] = useState(20);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<EcnStatus | undefined>(undefined);
+
+  const [aiCaps, setAiCaps] = useState<AiCapabilities | null>(null);
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiNotes, setAiNotes] = useState<string[]>([]);
+  /* What wrote the draft and whose account paid for it — shown once a draft comes back. */
+  const [aiDrafted, setAiDrafted] = useState<{ model: string; paidBy: AiPaidBy } | null>(null);
+  const [drafting, setDrafting] = useState(false);
+
+  useEffect(() => {
+    // Absent key is the normal case; a failure hides the field rather than raising an error.
+    void api
+      .getAiCapabilities()
+      .then(setAiCaps)
+      .catch(() => setAiCaps(null));
+  }, []);
+
+  /*
+   * Fills the form; saves nothing. Whatever the model could not resolve — and any part number
+   * it named that does not exist — is shown rather than quietly dropped, because the thing a
+   * reader must not do is accept a drafted change order without reading it.
+   */
+  const draft = async () => {
+    setDrafting(true);
+    setAiNotes([]);
+    setAiDrafted(null);
+    try {
+      const result = await api.aiDraftChangeOrder(aiDescription.trim());
+      form.setFieldsValue({
+        title: result.draft.title,
+        description: result.draft.description,
+        priority: result.draft.priority,
+      });
+      const notes = [...result.draft.uncertain];
+      if (result.draft.partNumbers.length > 0) {
+        notes.push(
+          `Suggested affected parts: ${result.draft.partNumbers.join(', ')} — add them on the ` +
+            'change order after creating it.'
+        );
+      }
+      if (result.discardedPartNumbers.length > 0) {
+        notes.push(
+          /*
+           * NOT "do not exist". The backend discards anything outside the candidate set it
+           * retrieved, and that set is filtered by the caller's access and matched on words
+           * from the description — so a discard is also what happens to a part that exists
+           * but is restricted from this person, or exists but was not named closely enough
+           * to be retrieved. Telling somebody a part of their own is not in their PLM, when
+           * it is merely hidden from them, would be the product lying about their data.
+           */
+          `It also named ${result.discardedPartNumbers.join(', ')}, which did not match any ` +
+            'part you can see. Ignored — check the number if you expected it.'
+        );
+      }
+      if (result.candidatesConsidered === 0) {
+        notes.push('No parts in your data matched the description, so none were suggested.');
+      }
+      setAiNotes(notes);
+      setAiDrafted({ model: result.model, paidBy: result.paidBy });
+    } catch (err) {
+      setModalError(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -238,6 +303,53 @@ export default function EcnList() {
         {modalError && (
           <Alert type="error" showIcon message={modalError} style={{ marginBottom: 16 }} />
         )}
+
+        {/*
+          Describe it in a sentence and let the model fill the form in, for the engineer to
+          edit. Hidden entirely when the deployment has no API key. Nothing is saved by this —
+          it writes into the fields below and the Create button still does the creating.
+        */}
+        {aiCaps?.features.draftChangeOrder && (
+          <div style={{ marginBottom: 16 }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                placeholder="Describe the change in a sentence, e.g. “thicken BRK-5501, it cracks under load”"
+                value={aiDescription}
+                onChange={(e) => setAiDescription(e.target.value)}
+                onPressEnter={() => void draft()}
+              />
+              <Button
+                icon={<BulbOutlined />}
+                loading={drafting}
+                onClick={() => void draft()}
+                disabled={aiDescription.trim().length < 10}
+              >
+                Draft
+              </Button>
+            </Space.Compact>
+            {aiDrafted && (
+              <div style={{ marginTop: 8 }}>
+                <AiProvenance model={aiDrafted.model} paidBy={aiDrafted.paidBy} />
+              </div>
+            )}
+            {aiNotes.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginTop: 8 }}
+                message="Check these before creating"
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {aiNotes.map((n) => (
+                      <li key={n}>{n}</li>
+                    ))}
+                  </ul>
+                }
+              />
+            )}
+          </div>
+        )}
+
         <Form form={form} layout="vertical">
           <Form.Item
             name="title"

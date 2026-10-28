@@ -68,6 +68,13 @@ import type {
   DocumentVersionDetail,
   EcnDetail,
   EcnDisposition,
+  AiCapabilities,
+  AiKeyStored,
+  AiProvider,
+  AiDraftChangeOrder,
+  AiNarrative,
+  AiReviewerSuggestions,
+  ChangeBrief,
   EcnImpactEntry,
   EcnItemDetail,
   EcnPriority,
@@ -412,6 +419,34 @@ export const transitionEcn = (
     json: { action, ...(extra ?? {}) },
   });
 export const getEcnImpact = (id: number) => request<EcnImpactEntry[]>(`/ecns/${id}/impact`);
+
+/**
+ * What the change reaches (rules CB1–CB4) — products, released assemblies, built and shipped
+ * units, traced requirements, open nonconformances. Distinct from `getEcnImpact`, which answers
+ * the narrower and still-useful question of which BOM LINES call a part out.
+ */
+export const getChangeBrief = (id: number) => request<ChangeBrief>(`/ecns/${id}/change-brief`);
+
+/** Answers even with no API key configured, so the UI can hide the AI actions (rule AI3a). */
+export const getAiCapabilities = () => request<AiCapabilities>('/ai/capabilities');
+
+export const putAiKey = (provider: AiProvider, apiKey: string) =>
+  request<AiKeyStored>('/ai/key', { method: 'PUT', json: { provider, apiKey } });
+
+export const deleteAiKey = () => request<void>('/ai/key', { method: 'DELETE' });
+
+/** ADMIN revoking somebody else's key. Clear-only — there is no endpoint that reads one. */
+export const deleteUserAiKey = (userId: number) =>
+  request<void>(`/ai/key/${userId}`, { method: 'DELETE' });
+
+export const aiEcnNarrative = (id: number) =>
+  request<AiNarrative>(`/ai/ecns/${id}/narrative`, { method: 'POST', json: {} });
+
+export const aiDraftChangeOrder = (description: string) =>
+  request<AiDraftChangeOrder>('/ai/draft-change-order', { method: 'POST', json: { description } });
+
+export const aiSuggestReviewers = (id: number) =>
+  request<AiReviewerSuggestions>(`/ai/ecns/${id}/suggest-reviewers`, { method: 'POST', json: {} });
 
 // ---- ECN reviewers ----
 export const listUsers = () => request<UserSummary[]>('/users');

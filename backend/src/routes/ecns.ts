@@ -12,6 +12,7 @@ import {
   WorkflowStatus,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { buildChangeBrief } from '../lib/changeBrief';
 import { asyncHandler, HttpError, idParam } from '../lib/errors';
 import { requireAuth } from '../middleware/auth';
 import {
@@ -1035,6 +1036,53 @@ router.post(
     }
 
     res.json(toEcnReview(updated));
+  })
+);
+
+// ---------------------------------------------------------------------------
+// GET /ecns/:id/change-brief — what this change reaches
+// ---------------------------------------------------------------------------
+
+/**
+ * Added ALONGSIDE `/impact` rather than replacing it, because they answer different
+ * questions and both are useful.
+ *
+ * `/impact` is about LINES: which BOM lines call this part out, with the find number and the
+ * quantity. That is what you need when editing a structure. It is also one level up by
+ * construction, and that is correct for what it reports.
+ *
+ * This is about CONSEQUENCES: the products the change reaches however deep, the released
+ * assemblies that use the parts being changed, the units already built and shipped, the
+ * requirements it may invalidate, the nonconformances still open against it. It is the thing
+ * the five-screens-and-hold-it-in-your-head ritual was approximating.
+ */
+router.get(
+  '/ecns/:id/change-brief',
+  asyncHandler(async (req, res) => {
+    const id = idParam(req.params.id);
+    const user = aclUser(req);
+    const ecn = await prisma.ecn.findFirst({
+      where: { id, ...aclFilter('ECN', user) },
+      select: {
+        id: true,
+        ecnNumber: true,
+        title: true,
+        status: true,
+        priority: true,
+        items: {
+          orderBy: { id: 'asc' },
+          select: {
+            partId: true,
+            part: { select: { id: true, partNumber: true, name: true } },
+            fromRevision: { select: { id: true, revision: true } },
+            toRevision: { select: { id: true, revision: true } },
+          },
+        },
+      },
+    });
+    if (!ecn) throw new HttpError(404, 'ECN not found');
+
+    res.json(await buildChangeBrief(ecn, user));
   })
 );
 
