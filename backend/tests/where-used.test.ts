@@ -286,7 +286,15 @@ describe('the walk as the change brief uses it', () => {
 describe('the redaction sentinel the UI tests for', () => {
   it('is the one the server sends', async () => {
     const { readFile } = await import('node:fs/promises');
-    const path = new URL('../../frontend/src/components/part/WhereUsedTab.tsx', import.meta.url);
+    const { resolve } = await import('node:path');
+    /*
+     * `__dirname`, not `import.meta.url`. This package is `"module": "commonjs"`, so
+     * `tsc --noEmit -p tsconfig.test.json` — the second half of `npm run typecheck`, which CI
+     * runs and a bare `tsc --noEmit` does not — rejects `import.meta` outright (TS1343). The
+     * hosted repo's copy of this test uses `import.meta.url` because its own tsconfig allows
+     * it; this one cannot.
+     */
+    const path = resolve(__dirname, '../../frontend/src/components/part/WhereUsedTab.tsx');
     /*
      * The one test here that reads across the package boundary, so the one test that can fail
      * for a reason having nothing to do with the code: a checkout with no frontend answers
@@ -297,7 +305,7 @@ describe('the redaction sentinel the UI tests for', () => {
     const tab = await readFile(path, 'utf8').catch((err: NodeJS.ErrnoException) => {
       throw new Error(
         err.code === 'ENOENT'
-          ? `Cannot check the redaction sentinel: ${path.pathname} is not present. This test ` +
+          ? `Cannot check the redaction sentinel: ${path} is not present. This test ` +
             'reads the frontend from the backend package; run it from a full checkout.'
           : String(err)
       );
