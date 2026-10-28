@@ -143,6 +143,33 @@ export default function EcnDetail() {
   // panel has to re-read the manifest to notice.
   const [signatureKey, setSignatureKey] = useState(0);
 
+  /*
+   * UP HERE WITH THE OTHER HOOKS, and it has to stay here.
+   *
+   * These four sat further down, next to the reviewer-suggestion handler they belong to, which
+   * reads better and crashed the page. The component returns early twice below — once while
+   * `loading`, once when the ECN is not found — so on the first render React saw the hooks
+   * above those returns and nothing else. When the fetch resolved and the full body ran, it
+   * saw four more, threw "Rendered more hooks than during the previous render", and the whole
+   * ECN page went blank. Every render of this page begins in the loading state, so it was not
+   * an edge case: it was the page.
+   *
+   * Nothing in the test suite could see it — the suites drive the API, and tsc does not
+   * enforce the rules of hooks. It took loading the page in a browser.
+   */
+  const [aiCaps, setAiCaps] = useState<AiCapabilities | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<AiReviewerSuggestions | null>(null);
+
+  useEffect(() => {
+    // A deployment with no key is the normal case, so a failure here hides the button rather
+    // than surfacing an error nobody can act on.
+    void api
+      .getAiCapabilities()
+      .then(setAiCaps)
+      .catch(() => setAiCaps(null));
+  }, []);
+
   const load = useCallback(async () => {
     if (!Number.isInteger(ecnId) || ecnId <= 0) {
       setNotFound(true);
@@ -409,19 +436,6 @@ export default function EcnDetail() {
       },
     });
   };
-
-  const [aiCaps, setAiCaps] = useState<AiCapabilities | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestions, setSuggestions] = useState<AiReviewerSuggestions | null>(null);
-
-  useEffect(() => {
-    // A deployment with no key is the normal case, so a failure here hides the button rather
-    // than surfacing an error nobody can act on.
-    void api
-      .getAiCapabilities()
-      .then(setAiCaps)
-      .catch(() => setAiCaps(null));
-  }, []);
 
   /*
    * Who has actually touched the affected parts. The suggestion is advisory and the counts it
