@@ -40,6 +40,7 @@ import portalRouter from './routes/portal';
 import { startEmailDispatcher } from './lib/mailer';
 import { startWebhookDispatcher } from './lib/webhooks';
 import statsRouter from './routes/stats';
+import aiRouter from './routes/ai';
 import { requireAuth } from './middleware/auth';
 import { apiKeyAuth } from './middleware/apikey';
 import { requireWriteRole } from './middleware/rbac';
@@ -100,6 +101,12 @@ app.use('/api', projectsRouter);
 app.use('/api', rfqRouter);
 app.use('/api', accessRouter);
 app.use('/api', statsRouter);
+/*
+ * Mounted inside the same chain as every other feature router, so the AI endpoints are
+ * subject to the same session, role and audit middleware. They read this deployment's own
+ * data as the signed-in user; none of them is a separate surface.
+ */
+app.use('/api', aiRouter);
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });

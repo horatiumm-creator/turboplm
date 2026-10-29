@@ -8,7 +8,40 @@ import { prisma } from '../lib/prisma';
  * request body. Mounted after requireAuth so req.user is set.
  */
 
-const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'secret']);
+/**
+ * Body fields whose VALUE must never reach the audit trail.
+ *
+ * Matched on a normalised name — lower-cased with `_` and `-` removed — and as a SUBSTRING,
+ * because the previous version was an exact, case-sensitive, top-level-only set of four
+ * literal names and that is not a property anybody can maintain. `clientSecret` did not match
+ * `secret`; `apiKey` matched nothing at all. The first endpoint to accept a credential under
+ * a name nobody had thought of would have written it, in plaintext, into the one table this
+ * product promises never to lose — and `GET /audit` hands `details` straight back to any
+ * authenticated caller.
+ *
+ * Over-redaction is the safe direction here. A field called `tokenCount` losing its value in
+ * the audit log costs a reader one lookup; a field called `openai_key` keeping its value costs
+ * a user their credential.
+ */
+const SENSITIVE_SUBSTRING =
+  /(password|passwd|secret|token|credential|authorization|accesskey|privatekey)/;
+
+/*
+ * ...and anything whose name ENDS in "key", which is the half a substring list keeps missing.
+ * `openai_key` normalises to `openaikey`: it contains neither `apikey` nor `accesskey`, so a
+ * list of known credential words let it straight through. The next provider will be called
+ * something else too.
+ *
+ * It over-matches a hypothetical `sortKey` or `partKey`, neither of which exists in any body
+ * this product accepts, and losing such a value in the trail costs a reader one lookup.
+ */
+function isSensitiveName(key: string): boolean {
+  const normalised = key.toLowerCase().replace(/[_-]/g, '');
+  return SENSITIVE_SUBSTRING.test(normalised) || normalised.endsWith('key');
+}
+
+/** Nested bodies are walked, but not forever: a cycle or a pathological nest must not hang. */
+const MAX_SANITIZE_DEPTH = 6;
 
 /** Path prefix → audit entity type. Longest match wins. */
 const ENTITY_PATTERNS: [RegExp, string][] = [
@@ -54,14 +87,31 @@ function deriveEntity(path: string): { entityType: string | null; entityId: numb
   return { entityType: null, entityId: null };
 }
 
+/**
+ * Walks the whole body, not just its top level.
+ *
+ * The old version replaced values on the first level and copied everything below it through
+ * untouched, so `{credentials: {apiKey: "..."}}` was recorded in full. It also ran on arrays
+ * by returning them verbatim.
+ *
+ * REDACTED, NOT REMOVED. The key stays with `'[redacted]'` in place of its value, because the
+ * audit trail's job is to say what happened: "they set a key" is the fact being recorded, and
+ * a field that vanishes reads as a field that was never sent.
+ */
+function scrub(value: unknown, depth: number): unknown {
+  if (depth > MAX_SANITIZE_DEPTH) return '[too deep]';
+  if (Array.isArray(value)) return value.map((entry) => scrub(entry, depth + 1));
+  if (value === null || typeof value !== 'object') return value;
+  const clean: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    clean[key] = isSensitiveName(key) ? '[redacted]' : scrub(inner, depth + 1);
+  }
+  return clean;
+}
+
 function sanitize(body: unknown): Prisma.InputJsonValue | undefined {
   if (body === null || body === undefined || typeof body !== 'object') return undefined;
-  if (Array.isArray(body)) return body as Prisma.InputJsonValue;
-  const clean: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    clean[key] = SENSITIVE_KEYS.has(key) ? '[redacted]' : value;
-  }
-  return clean as Prisma.InputJsonValue;
+  return scrub(body, 0) as Prisma.InputJsonValue;
 }
 
 export function auditMiddleware(req: Request, res: Response, next: NextFunction): void {

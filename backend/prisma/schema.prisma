@@ -19,6 +19,12 @@ enum Role {
   VIEWER
 }
 
+/// Which language-model service a user's own API key is for.
+enum AiProvider {
+  ANTHROPIC
+  OPENAI
+}
+
 enum PartCategory {
   ASSEMBLY
   MECHANICAL
@@ -100,6 +106,21 @@ model User {
   passwordHash     String?
   provider         AuthProvider           @default(LOCAL)
   googleId         String?                @unique
+  /// Which service this user's own key is for. Null means they have not brought one, and the
+  /// deployment's key (if any) is used instead.
+  ///
+  /// Set together with `aiKeyEnc` or not at all: (OPENAI, no key) is a state where the
+  /// resolution order would read the provider off the user and the credential off the
+  /// operator's account. Only `PUT /ai/key` writes these, and it writes all four, so
+  /// routes/ai.ts requires both halves before it uses either.
+  aiProvider       AiProvider?
+  /// AES-256-GCM ciphertext from lib/secretBox.ts, bound by AAD to this row. WRITE-ONLY:
+  /// no endpoint returns it, masked or otherwise, and no DTO spreads the User row.
+  aiKeyEnc         String?
+  /// The last four characters, so the UI can show "…A1b2" without decrypting anything. Only
+  /// ever derived from a value that passed the provider's format check.
+  aiKeyHint        String?
+  aiKeySetAt       DateTime?
   avatarUrl        String?
   role             Role                   @default(ENGINEER)
   createdAt        DateTime               @default(now())
