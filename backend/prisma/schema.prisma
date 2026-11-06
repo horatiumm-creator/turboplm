@@ -180,6 +180,21 @@ model User {
   buildUnitAclsFor     BuildUnitAcl[]   @relation("BuildUnitAclUser")
   projectMemberships ProjectMember[] @relation("ProjectMemberUser")
   projectMembersAdded ProjectMember[] @relation("ProjectMemberAddedBy")
+  /// Collaboration. Authored comments, the mentions pointing at them, follows, and the
+  /// action items this person owns, raised or closed.
+  comments            Comment[]        @relation("CommentAuthor")
+  commentMentions     CommentMention[] @relation("CommentMentionUser")
+  watches             Watch[]          @relation("WatchUser")
+  actionItemsAssigned ActionItem[]     @relation("ActionItemAssignee")
+  actionItemsCreated  ActionItem[]     @relation("ActionItemCreatedBy")
+  actionItemsClosed   ActionItem[]     @relation("ActionItemClosedBy")
+  /// Compliance, obsolescence and waivers.
+  substancesDeclared   PartSubstance[]      @relation("PartSubstanceDeclaredBy")
+  compliancesDeclared  PartCompliance[]     @relation("PartComplianceDeclaredBy")
+  noticesReceived      ManufacturerNotice[] @relation("NoticeReceivedBy")
+  waiversRequested     Waiver[]             @relation("WaiverRequestedBy")
+  waiversApproved      Waiver[]             @relation("WaiverApprovedBy")
+  waiverUsagesRecorded WaiverUsage[]        @relation("WaiverUsageRecordedBy")
 }
 
 model Part {
@@ -213,6 +228,11 @@ model Part {
   catalogImportRows  CatalogImportRow[]
   materials          PartMaterial[]
   acls               PartAcl[]
+  comments    Comment[]
+  watches     Watch[]
+  substances   PartSubstance[]
+  compliances  PartCompliance[]
+  waivers      Waiver[]
 }
 
 model PartRevision {
@@ -234,6 +254,8 @@ model PartRevision {
   baselines       Baseline[]
   nonconformances Nonconformance[]
   buildUnits      BuildUnit[]
+  pinnedOnBomLines BomLine[]        @relation("BomLinePinnedChild")
+
 
   @@unique([partId, revision])
   @@index([partId])
@@ -268,6 +290,10 @@ model Ecn {
   deliverables    ProjectDeliverable[]
   serviceRecords  ServiceRecord[]
   acls            EcnAcl[]
+  comments    Comment[]
+  watches     Watch[]
+  noticeItems  ManufacturerNoticeItem[] @relation("NoticeEcn")
+  waivers      Waiver[]                 @relation("WaiverEcn")
 }
 
 model Document {
@@ -292,6 +318,8 @@ model Document {
   lockExpiresAt    DateTime?
   lockNote         String?
   acls             DocumentAcl[]
+  complianceEvidenceFor PartCompliance[]     @relation("ComplianceEvidence")
+  manufacturerNotices   ManufacturerNotice[] @relation("NoticeDocument")
 }
 
 enum ConversionStatus {
@@ -404,6 +432,8 @@ model Ecr {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   markups      Markup[]
+  comments    Comment[]
+  watches     Watch[]
 }
 
 model Manufacturer {
@@ -412,6 +442,7 @@ model Manufacturer {
   website   String?
   createdAt DateTime           @default(now())
   parts     ManufacturerPart[]
+  notices  ManufacturerNotice[]
 }
 
 model ManufacturerPart {
@@ -428,6 +459,21 @@ model ManufacturerPart {
   distributorPartNumber String?
   createdAt      DateTime     @default(now())
   importRows     CatalogImportRow[]
+  /// THE MANUFACTURER'S FACT, which is a different thing from `status` above and must not be
+  /// folded into it: a part they still ship can be obsolete to you because you chose to stop
+  /// using it, and one you still call approved can be end-of-life at the factory.
+  ///
+  /// Defaults to UNKNOWN rather than ACTIVE, because nobody has told us -- and a default of
+  /// ACTIVE would mean every part in the database claiming a lifecycle nobody asserted.
+  lifecycle             PartLifecycle      @default(UNKNOWN)
+  /// Carried from the notice that said so, so the dates survive the notice being superseded.
+  eolAnnouncedAt        DateTime?
+  lastTimeBuyAt         DateTime?
+  lastShipAt            DateTime?
+  /// Their suggested replacement, free text for the same reason as on the notice.
+  replacementMpn        String?
+  noticeItems  ManufacturerNoticeItem[]
+
 
   @@unique([partId, manufacturerId, mpn])
   @@index([partId])
@@ -514,6 +560,9 @@ model Requirement {
   updatedAt    DateTime             @updatedAt
   links        RequirementLink[]
   deliverables ProjectDeliverable[]
+  comments    Comment[]
+  watches     Watch[]
+
 
   @@index([parentId])
 }
@@ -832,6 +881,9 @@ model Project {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   phases      ProjectPhase[]
+  comments     Comment[]
+  watches      Watch[]
+  actionItems  ActionItem[]
 }
 
 model ProjectPhase {
@@ -847,6 +899,11 @@ model ProjectPhase {
   passedById   Int?
   passedBy     User?                @relation("PhasePassedBy", fields: [passedById], references: [id])
   deliverables ProjectDeliverable[]
+  actionItems  ActionItem[]
+  /// Gates this one waits on, and the gates waiting on it.
+  dependsOn    PhaseDependency[] @relation("PhaseDependencyPhase")
+  blocks       PhaseDependency[] @relation("PhaseDependencyDependsOn")
+
 
   @@unique([projectId, seq])
 }
@@ -1078,6 +1135,9 @@ model BomLine {
   alternates       BomLineAlternate[]
   optionConditions BomLineOption[]
   asBuiltLines     AsBuiltLine[]
+  childRevisionId  Int?
+  childRevision    PartRevision?      @relation("BomLinePinnedChild", fields: [childRevisionId], references: [id], onDelete: Restrict)
+
 
   @@unique([parentRevisionId, findNumber])
   @@unique([parentRevisionId, childPartId])
@@ -1258,6 +1318,8 @@ model BuildUnit {
   /// Lines where this unit is the thing consumed.
   consumedBy     AsBuiltLine[]    @relation("AsBuiltChild")
   nonconformances Nonconformance[]
+  waiverUsages  WaiverUsage[]
+
 
   @@index([partId])
   @@index([status])
@@ -1829,4 +1891,341 @@ model BuildUnitAcl {
   @@unique([buildUnitId, userId])
   @@index([groupId])
   @@index([userId])
+}
+
+enum ActionItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum ComplianceStatus {
+  COMPLIANT
+  NON_COMPLIANT
+  /// Compliant by a named exemption (RoHS Annex III/IV), which expires and must be reviewed.
+  EXEMPT
+  UNKNOWN
+}
+
+enum NoticeKind {
+  /// Product Change Notice: the part is changing but remains available.
+  PCN
+  /// End of life, usually with a last-time-buy date.
+  EOL
+  /// Not recommended for new designs.
+  NRND
+  /// Discontinued without notice, or discovered after the fact.
+  DISCONTINUED
+}
+
+enum PartLifecycle {
+  ACTIVE
+  /// Not recommended for new designs: still shipping, do not design it in again.
+  NRND
+  EOL_ANNOUNCED
+  OBSOLETE
+  UNKNOWN
+}
+
+enum Regulation {
+  ROHS
+  REACH_SVHC
+  PFAS
+  PROP65
+  CONFLICT_MINERALS
+  TSCA
+}
+
+enum WaiverStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  /// Past its date or its quantity. Terminal, and reached without anybody acting.
+  EXPIRED
+  /// Closed early by a person.
+  CLOSED
+}
+
+model ActionItem {
+  id          Int              @id @default(autoincrement())
+  projectId   Int
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Optional: an item raised at a phase review hangs off that phase, one raised anywhere
+  /// else hangs off the project.
+  phaseId     Int?
+  phase       ProjectPhase?    @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  title       String
+  description String?
+  status      ActionItemStatus @default(OPEN)
+  assigneeId  Int?
+  assignee    User?            @relation("ActionItemAssignee", fields: [assigneeId], references: [id])
+  dueDate     DateTime?
+  closedAt    DateTime?
+  closedById  Int?
+  closedBy    User?            @relation("ActionItemClosedBy", fields: [closedById], references: [id])
+  createdById Int
+  createdBy   User             @relation("ActionItemCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([projectId, status])
+  @@index([assigneeId, status])
+  @@index([dueDate])
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  body      String
+  authorId  Int
+  author    User     @relation("CommentAuthor", fields: [authorId], references: [id])
+  /// One level of threading: a reply points at the comment it answers, and a reply cannot
+  /// itself be replied to (enforced in the route, not the schema — the column permits a
+  /// chain and the route refuses one, so the data stays shaped like the UI renders it).
+  parentId  Int?
+  parent    Comment? @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentThread")
+  /// Exactly one of these is set. See the CHECK in the migration.
+  partId        Int?
+  part          Part?        @relation(fields: [partId], references: [id], onDelete: Cascade)
+  ecnId         Int?
+  ecn           Ecn?         @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  ecrId         Int?
+  ecr           Ecr?         @relation(fields: [ecrId], references: [id], onDelete: Cascade)
+  projectId     Int?
+  project       Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requirementId Int?
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  mentions  CommentMention[]
+  /// Edited in place keeps the id, so replies and mentions still point somewhere.
+  editedAt  DateTime?
+  /// A TOMBSTONE, not a delete. Removing the row would take its replies with it (the
+  /// self-relation cascades) and leave a thread that reads as though the reply answered
+  /// nothing. The route blanks the body and the UI says the comment was withdrawn.
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([partId, createdAt])
+  @@index([ecnId, createdAt])
+  @@index([ecrId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([requirementId, createdAt])
+  @@index([parentId])
+}
+
+model CommentMention {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation("CommentMentionUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+  @@index([userId, createdAt])
+}
+
+model ManufacturerNotice {
+  id             Int        @id @default(autoincrement())
+  noticeNumber   String
+  kind           NoticeKind
+  manufacturerId Int
+  manufacturer   Manufacturer @relation(fields: [manufacturerId], references: [id])
+  /// The manufacturer's own reference, which is what they will quote back at you.
+  reference      String?
+  title          String
+  summary        String?
+  issuedAt       DateTime?
+  /// When the change takes effect, or when the part stops being available.
+  effectiveAt    DateTime?
+  /// The date after which no more can be bought. The most important field here.
+  lastTimeBuyAt  DateTime?
+  /// Their suggested replacement, as free text: it is their part number, it may not exist in
+  /// this database at all, and so it is deliberately not a foreign key.
+  replacementMpn String?
+  documentId     Int?
+  document       Document?  @relation("NoticeDocument", fields: [documentId], references: [id])
+  receivedById   Int
+  receivedBy     User       @relation("NoticeReceivedBy", fields: [receivedById], references: [id])
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  items          ManufacturerNoticeItem[]
+
+  @@unique([noticeNumber])
+  @@index([manufacturerId])
+  @@index([lastTimeBuyAt])
+}
+
+model ManufacturerNoticeItem {
+  id                 Int                @id @default(autoincrement())
+  noticeId           Int
+  notice             ManufacturerNotice @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  manufacturerPartId Int
+  manufacturerPart   ManufacturerPart   @relation(fields: [manufacturerPartId], references: [id], onDelete: Cascade)
+  /// What was decided about this one. Free text, because the real answers are things like
+  /// "qualify the replacement" or "last-time-buy 4000" and an enum would flatten them.
+  disposition        String?
+  /// The change order raised to deal with it, once there is one.
+  ecnId              Int?
+  ecn                Ecn?               @relation("NoticeEcn", fields: [ecnId], references: [id])
+  createdAt          DateTime           @default(now())
+
+  @@unique([noticeId, manufacturerPartId])
+  @@index([manufacturerPartId])
+}
+
+model PartCompliance {
+  id                 Int              @id @default(autoincrement())
+  partId             Int
+  part               Part             @relation(fields: [partId], references: [id], onDelete: Cascade)
+  regulation         Regulation
+  status             ComplianceStatus @default(UNKNOWN)
+  /// The supplier's declaration or test report. A status with no evidence is somebody's
+  /// recollection, which is why the screen shows the two together.
+  evidenceDocumentId Int?
+  evidenceDocument   Document?        @relation("ComplianceEvidence", fields: [evidenceDocumentId], references: [id])
+  /// When the declaration was MADE, not when it was typed in: a 2019 declaration is a fact
+  /// about 2019, and the roll-up reports how old its oldest evidence is.
+  declaredAt         DateTime?
+  /// An EXEMPT status usually expires. A date in the past does not rewrite `status` -- the
+  /// roll-up reports it instead, because silently flipping somebody's declaration is worse.
+  expiresAt          DateTime?
+  declaredById       Int?
+  declaredBy         User?            @relation("PartComplianceDeclaredBy", fields: [declaredById], references: [id])
+  notes              String?
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([partId, regulation])
+  @@index([partId])
+}
+
+model PartSubstance {
+  id            Int       @id @default(autoincrement())
+  partId        Int
+  part          Part      @relation(fields: [partId], references: [id], onDelete: Cascade)
+  substanceId   Int
+  substance     Substance @relation(fields: [substanceId], references: [id], onDelete: Cascade)
+  /// Measured or declared concentration. Nullable: a supplier often confirms presence without
+  /// a figure, and recording a 0 nobody told us would be an invention.
+  ppm           Float?
+  /// RoHS Annex III/IV exemption code, where presence is permitted.
+  exemptionCode String?
+  notes         String?
+  declaredAt    DateTime  @default(now())
+  declaredById  Int?
+  declaredBy    User?     @relation("PartSubstanceDeclaredBy", fields: [declaredById], references: [id])
+
+  @@unique([partId, substanceId])
+  @@index([partId])
+  @@index([substanceId])
+}
+
+model PhaseDependency {
+  id              Int          @id @default(autoincrement())
+  phaseId         Int
+  phase           ProjectPhase @relation("PhaseDependencyPhase", fields: [phaseId], references: [id], onDelete: Cascade)
+  dependsOnId     Int
+  dependsOn       ProjectPhase @relation("PhaseDependencyDependsOn", fields: [dependsOnId], references: [id], onDelete: Cascade)
+  createdById     Int
+  createdAt       DateTime     @default(now())
+
+  @@unique([phaseId, dependsOnId])
+  @@index([dependsOnId])
+}
+
+model Substance {
+  id           Int        @id @default(autoincrement())
+  name         String
+  /// CAS Registry Number, the only identifier suppliers and regulators agree on. Nullable
+  /// because some entries are groups rather than single compounds (PFAS, phthalates).
+  casNumber    String?
+  regulation   Regulation
+  /// Parts per million above which the substance must be declared. Nullable where the
+  /// regulation sets none, and a null is NOT zero.
+  thresholdPpm Float?
+  notes        String?
+  createdAt    DateTime   @default(now())
+  parts        PartSubstance[]
+
+  @@unique([regulation, name])
+}
+
+model Waiver {
+  id            Int          @id @default(autoincrement())
+  waiverNumber  String
+  title         String
+  /// Why the departure is acceptable. Required: a waiver with no reason is an unexplained
+  /// exception, which is exactly what an auditor is looking for.
+  justification String
+  status        WaiverStatus @default(DRAFT)
+  partId        Int
+  part          Part         @relation(fields: [partId], references: [id], onDelete: Cascade)
+  /// The change this waiver covers the gap before, where there is one.
+  ecnId         Int?
+  ecn           Ecn?         @relation("WaiverEcn", fields: [ecnId], references: [id])
+  /// THE BOUND. At least one of these two must be set, enforced by a CHECK in the migration: a
+  /// waiver with neither is unlimited permission, which is not a waiver.
+  quantityLimit Int?
+  expiresAt     DateTime?
+  requestedById Int
+  requestedBy   User         @relation("WaiverRequestedBy", fields: [requestedById], references: [id])
+  approvedById  Int?
+  approvedBy    User?        @relation("WaiverApprovedBy", fields: [approvedById], references: [id])
+  approvedAt    DateTime?
+  closedAt      DateTime?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  usages        WaiverUsage[]
+
+  @@unique([waiverNumber])
+  @@index([partId])
+  @@index([status])
+}
+
+model WaiverUsage {
+  id           Int       @id @default(autoincrement())
+  waiverId     Int
+  waiver       Waiver    @relation(fields: [waiverId], references: [id], onDelete: Cascade)
+  buildUnitId  Int
+  buildUnit    BuildUnit @relation(fields: [buildUnitId], references: [id], onDelete: Cascade)
+  recordedById Int
+  recordedBy   User      @relation("WaiverUsageRecordedBy", fields: [recordedById], references: [id])
+  recordedAt   DateTime  @default(now())
+  notes        String?
+
+  @@unique([waiverId, buildUnitId])
+  @@index([buildUnitId])
+}
+
+model Watch {
+  id            Int          @id @default(autoincrement())
+  userId        Int
+  user          User         @relation("WatchUser", fields: [userId], references: [id], onDelete: Cascade)
+  partId        Int?
+  part          Part?        @relation(fields: [partId], references: [id], onDelete: Cascade)
+  ecnId         Int?
+  ecn           Ecn?         @relation(fields: [ecnId], references: [id], onDelete: Cascade)
+  ecrId         Int?
+  ecr           Ecr?         @relation(fields: [ecrId], references: [id], onDelete: Cascade)
+  projectId     Int?
+  project       Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requirementId Int?
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now())
+
+  @@index([userId])
+  /// One index per subject, matching Comment's.
+  ///
+  /// "Who follows this part" is the query every comment write makes to build its recipient
+  /// list, and it runs with userId unknown — so the (userId) index above serves it no better
+  /// than a scan of the whole follow set. Comment was indexed per subject from the start and
+  /// Watch was not, which was an oversight rather than a decision.
+  @@index([partId])
+  @@index([ecnId])
+  @@index([ecrId])
+  @@index([projectId])
+  @@index([requirementId])
 }

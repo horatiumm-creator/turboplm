@@ -16,10 +16,11 @@
  *
  * TWO THINGS FROM THE HOSTED SUITE ARE ABSENT, deliberately, and neither is a test gap:
  *
- *  1. Revision narrowing. There, `walkWhereUsed(partId, revisionId, user)` can answer "which
+ *  1. Revision narrowing. `walkWhereUsed(partId, revisionId, user)` can answer "which
  *     assemblies hold this exact revision", because a BOM line is pinned to a child revision
- *     at release. Here a line names a PART and nothing records the pin, so there is no such
- *     question to ask and the signature has no `revisionId`.
+ *     at release. These cases pass `null` for it and ask the broader question — "what
+ *     contains this part" — which is what the change brief needs. The narrowed form is
+ *     exercised where it is used: retiring a revision something still contains.
  *  2. The obsolete guard. There, retiring a revision a released assembly still contains is
  *     refused unless the caller passes `acknowledgeInUse`, and the walk is what makes that
  *     refusal precise. This build has no such guard — `grep acknowledgeInUse src/` finds
@@ -77,7 +78,7 @@ describe('recursive where-used', () => {
     expect(flat.body[0].parentPart.id).toBe(sub.id);
 
     // The recursive walk reaches the top.
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     const ids = tree.used.map((n) => n.parentPart.id);
     expect(ids).toContain(sub.id);
     expect(ids).toContain(top.id);
@@ -85,7 +86,7 @@ describe('recursive where-used', () => {
 
   it('names the products as top level and nothing else', async () => {
     const { leaf, sub, top } = await threeLevels();
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     const tops = tree.topLevel.map((n) => n.parentPart.id);
     expect(tops).toEqual([top.id]);
     expect(tops).not.toContain(sub.id);
@@ -93,7 +94,7 @@ describe('recursive where-used', () => {
 
   it('reports how far up each assembly sits, and the path taken', async () => {
     const { leaf, sub, top } = await threeLevels();
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     const byId = new Map(tree.used.map((n) => [n.parentPart.id, n]));
     expect(byId.get(sub.id)!.level).toBe(1);
     expect(byId.get(top.id)!.level).toBe(2);
@@ -102,7 +103,7 @@ describe('recursive where-used', () => {
 
   it('returns nothing for a part nobody uses', async () => {
     const orphan = await createPart({ createdById: engineer.id });
-    const tree = await walkWhereUsed(orphan.id, asEngineer);
+    const tree = await walkWhereUsed(orphan.id, null, asEngineer);
     expect(tree.used).toEqual([]);
     expect(tree.topLevel).toEqual([]);
   });
@@ -127,7 +128,7 @@ describe('recursive where-used', () => {
     await addBomLine({ parentRevisionId: top.revisionId, childPartId: sub.id, quantity: 1 });
     await release(top.revisionId);
 
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     const rows = tree.used.filter((n) => n.parentPart.id === top.id);
     expect(rows).toHaveLength(1);
     expect(rows[0].level).toBe(1);
@@ -145,7 +146,7 @@ describe('recursive where-used', () => {
     await addBomLine({ parentRevisionId: a.revisionId, childPartId: b.id, quantity: 1 });
     await addBomLine({ parentRevisionId: b.revisionId, childPartId: a.id, quantity: 1 });
 
-    const tree = await walkWhereUsed(a.id, asEngineer);
+    const tree = await walkWhereUsed(a.id, null, asEngineer);
     // Two assemblies exist, so the walk reports at most two rows and stops.
     expect(tree.used.length).toBeLessThanOrEqual(2);
   }, 15_000);
@@ -168,7 +169,7 @@ describe('recursive where-used', () => {
       childId = parent.id;
     }
 
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     expect(Math.max(...tree.used.map((r) => r.level))).toBeLessThanOrEqual(MAX_TREE_DEPTH);
     expect(tree.used.length).toBeLessThan(chain.length);
     expect(tree.notes.join(' ')).toMatch(new RegExp(`${MAX_TREE_DEPTH} levels`));
@@ -187,7 +188,7 @@ describe('recursive where-used', () => {
       data: { partId: secret.id, userId: owner.id, grantedById: owner.id },
     });
 
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     expect(tree.used).toHaveLength(1);
     expect(JSON.stringify(tree)).not.toContain('SECRET-WU');
     expect(tree.used[0].parentPart.partNumber).toBe(REDACTED.partNumber);
@@ -213,7 +214,7 @@ describe('recursive where-used', () => {
       data: { partId: secretSub.id, userId: owner.id, grantedById: owner.id },
     });
 
-    const tree = await walkWhereUsed(leaf.id, asEngineer);
+    const tree = await walkWhereUsed(leaf.id, null, asEngineer);
     const visibleTop = tree.used.find((n) => n.parentPart.id === top.id);
     // The caller may read the product, so its own name stays...
     expect(visibleTop!.path.at(-1)).toBe(top.partNumber);

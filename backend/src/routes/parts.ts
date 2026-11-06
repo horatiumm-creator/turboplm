@@ -18,7 +18,7 @@ import {
   REDACTED,
   type AclUser,
 } from '../lib/acl';
-import { escapeLike, generatePartNumber, nextRevisionLabel, withNumberLock } from '../lib/plm';
+import { pinChildRevisions, escapeLike, generatePartNumber, nextRevisionLabel, withNumberLock } from '../lib/plm';
 import { assertSignaturesComplete } from './signatures';
 import { emitEvent } from '../lib/webhooks';
 
@@ -973,6 +973,17 @@ router.post(
           409,
           `Cannot ${action}: revision ${revision.revision} was changed concurrently — reload and try again`
         );
+      }
+
+      /*
+       * Freeze the structure at the moment it is released.
+       *
+       * Inside the same transaction as the lifecycle write, so a released assembly can never
+       * exist without its pins — an unpinned released revision is indistinguishable from one
+       * released before this feature, and would silently resume following its children.
+       */
+      if (action === 'approve') {
+        await pinChildRevisions(tx, id);
       }
 
       // Rule I2 — queue outbound webhooks inside the transaction, so deliveries

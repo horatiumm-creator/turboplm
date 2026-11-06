@@ -41,6 +41,15 @@ import { startEmailDispatcher } from './lib/mailer';
 import { startWebhookDispatcher } from './lib/webhooks';
 import statsRouter from './routes/stats';
 import aiRouter from './routes/ai';
+import complianceRouter from './routes/compliance';
+import obsolescenceRouter from './routes/obsolescence';
+import waiversRouter from './routes/waivers';
+import releaseRouter from './routes/release';
+import releaseCascadeRouter from './routes/releaseCascade';
+import replaceRouter from './routes/replace';
+import bomBulkRouter from './routes/bomBulk';
+import collabRouter from './routes/collab';
+import activityRouter from './routes/activity';
 import { requireAuth } from './middleware/auth';
 import { apiKeyAuth } from './middleware/apikey';
 import { requireWriteRole } from './middleware/rbac';
@@ -107,6 +116,15 @@ app.use('/api', statsRouter);
  * data as the signed-in user; none of them is a separate surface.
  */
 app.use('/api', aiRouter);
+app.use('/api', complianceRouter);
+app.use('/api', obsolescenceRouter);
+app.use('/api', waiversRouter);
+app.use('/api', releaseRouter);
+app.use('/api', releaseCascadeRouter);
+app.use('/api', replaceRouter);
+app.use('/api', bomBulkRouter);
+app.use('/api', collabRouter);
+app.use('/api', activityRouter);
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });

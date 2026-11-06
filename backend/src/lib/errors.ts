@@ -69,3 +69,22 @@ export function idParam(value: string, label = 'id'): number {
   if (!Number.isInteger(n) || n <= 0 || n > 2147483647) throw new HttpError(400, `Invalid ${label}`);
   return n;
 }
+
+/**
+ * Parse a positive integer QUERY parameter, falling back rather than refusing when it is
+ * absent or malformed in the ways express produces.
+ *
+ * A value that is not a string at all is express handing back an array or an object for a
+ * repeated or bracketed parameter (`?limit=1&limit=2`). That takes the fallback rather than a
+ * 400: a caller who repeats a parameter has not asked for anything incoherent, and refusing
+ * the page over it would be a worse answer than using the default. A string that is present
+ * but not a positive integer IS refused, because that one is a mistake worth reporting.
+ */
+export function positiveIntQuery(value: unknown, label: string, fallback: number): number {
+  if (typeof value !== 'string' || value.trim() === '') return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 2147483647) {
+    throw new HttpError(400, `Invalid ${label}`);
+  }
+  return n;
+}

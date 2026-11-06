@@ -152,7 +152,7 @@ export async function buildChangeBrief(
      * assessed BEFORE release is most of them: an unreleased assembly using this part has
      * not escaped the change, it just has not met it yet.
      */
-    const tree = await walkWhereUsed(item.partId, user);
+    const tree = await walkWhereUsed(item.partId, null, user);
     const products = tree.topLevel;
     const visibleProductIds = await visibleIds(
       'PART',

@@ -1,19 +1,14 @@
 /**
  * Walking UPWARD from a part to every assembly that contains it.
  *
- * Its own module rather than a helper inside a route, because two screens ask the same
- * question and the shallow answer is a trap. `GET /parts/:id/where-used` and
- * `GET /ecns/:id/impact` both do `bomLine.findMany({ where: { childPartId } })` — one level.
- * That is the right answer for the structure editor, where you want the lines that call a
- * part out with their find numbers. It is the wrong answer for "what does this change
- * break?", where one level shows the sub-assemblies and never the products.
+ * Extracted from `routes/bom.ts` so the ECN change brief can ask the same question the
+ * where-used tab asks, rather than growing a second, shallower answer beside it. That second
+ * answer is exactly what existed: `GET /ecns/:id/impact` did `bomLine.findMany({ where: {
+ * childPartId } })`, one level, so the screen whose whole job is "what does this change
+ * break?" showed the sub-assemblies and never the products.
  *
- * NO REVISION NARROWING, because a BOM line in this build names a child PART and not a
- * child revision: there is no `childRevisionId` to pin a line to the revision being
- * replaced. So the question this answers is "what contains this part", at every level, and
- * the honest reading of the answer is that every assembly listed will follow the part as it
- * is revised. Nothing here claims to know which assemblies hold one specific old revision,
- * because the schema does not record it.
+ * Rules WU1 and WU2 in CONTRACTS.md describe the behaviour; the comments below record why
+ * each part of it is shaped the way it is.
  */
 import { Lifecycle } from '@prisma/client';
 import { prisma } from './prisma';
@@ -40,6 +35,12 @@ export interface WhereUsedNode {
   level: number;
   /** True when nothing consumes this assembly: the top of a product. */
   isTopLevel: boolean;
+  /**
+   * True when this assembly's line is PINNED to the revision asked about, rather than merely
+   * using the part. Only a pinned consumer is definitely affected by retiring that revision;
+   * an unpinned one is a draft that will re-resolve.
+   */
+  pinnedToRevision: boolean;
   /** Part numbers from the part asked about up to this assembly, for reading a path back. */
   path: string[];
 }
@@ -55,7 +56,12 @@ export interface WhereUsedTreeDto {
   notes: string[];
 }
 
-export async function walkWhereUsed(partId: number, user: AclUser): Promise<WhereUsedTreeDto> {
+
+export async function walkWhereUsed(
+  partId: number,
+  revisionId: number | null,
+  user: AclUser
+): Promise<WhereUsedTreeDto> {
   const notes: string[] = [];
   const found = new Map<number, WalkedNode>();
   /*
@@ -74,6 +80,8 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
     level: number;
     path: string[];
     pathIds: number[];
+    /** Only meaningful at level 1: narrow to lines pinned to this revision. */
+    pinnedRevisionId: number | null;
   }
 
   const startPart = await prisma.part.findUnique({
@@ -86,6 +94,7 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
       level: 1,
       path: [startPart?.partNumber ?? String(partId)],
       pathIds: [partId],
+      pinnedRevisionId: revisionId,
     },
   ];
 
@@ -98,8 +107,14 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
 
     for (const step of frontier) {
       const lines = await prisma.bomLine.findMany({
-        where: { childPartId: step.childPartId },
+        where: {
+          childPartId: step.childPartId,
+          // The revision filter applies only to the FIRST hop. Above that the question is
+          // "what contains this assembly", which no pin narrows.
+          ...(step.pinnedRevisionId !== null ? { childRevisionId: step.pinnedRevisionId } : {}),
+        },
         select: {
+          childRevisionId: true,
           parentRevision: {
             select: {
               id: true,
@@ -124,6 +139,8 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
           level: step.level,
           // Filled in below, once every level is known.
           isTopLevel: false,
+          pinnedToRevision:
+            step.pinnedRevisionId !== null && line.childRevisionId === step.pinnedRevisionId,
           path,
           pathIds,
         });
@@ -132,6 +149,7 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
           level: step.level + 1,
           path,
           pathIds,
+          pinnedRevisionId: null,
         });
       }
     }
@@ -170,7 +188,7 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
       parentPart: visible.has(node.parentPart.id)
         ? node.parentPart
         : { id: node.parentPart.id, partNumber: REDACTED.partNumber, name: REDACTED.name },
-      // Index 0 is the part asked about, which the caller's own ACL check already cleared.
+      // Index 0 is the part asked about, which assertCanRead already cleared.
       path: node.path.map((step, i) =>
         i === 0 || visible.has(pathIds[i]) ? step : REDACTED.partNumber
       ),
@@ -179,3 +197,4 @@ export async function walkWhereUsed(partId: number, user: AclUser): Promise<Wher
 
   return { used: nodes, topLevel: nodes.filter((n) => n.isTopLevel), notes };
 }
+

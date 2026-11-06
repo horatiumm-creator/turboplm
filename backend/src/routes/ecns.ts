@@ -24,7 +24,7 @@ import {
   visibleIds,
 } from '../lib/acl';
 import { assertSignaturesComplete } from './signatures';
-import { nextRevisionLabel, withNumberLock } from '../lib/plm';
+import { pinChildRevisions, nextRevisionLabel, withNumberLock } from '../lib/plm';
 import { notifyUsers } from '../lib/notify';
 import { emitEvent } from '../lib/webhooks';
 import { instantiateWorkflow } from './workflows';
@@ -1428,6 +1428,17 @@ router.post(
             409,
             'Cannot release: a revision was changed concurrently — reload and try again'
           );
+        }
+        /*
+         * Freeze each released structure, exactly as the direct transition does.
+         *
+         * A BOM released through a change order has to be pinned as firmly as one released
+         * on its own — if only one path pinned, whether an assembly's structure stays put
+         * would depend on which button somebody pressed, which is the kind of inconsistency
+         * nobody discovers until they are comparing two assemblies that should match.
+         */
+        for (const revisionId of toRevisionIds) {
+          await pinChildRevisions(tx, revisionId);
         }
         await conditionalUpdate(tx, {
           releasedAt: now,
