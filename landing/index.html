@@ -205,6 +205,11 @@
   .mock-h{display:flex;align-items:center;gap:10px;margin-bottom:4px}
   .mock-h strong{font-size:1.02rem}
   .tag{font-size:.7rem;padding:2px 8px;border-radius:5px;font-weight:700;border:1px solid var(--line);color:var(--muted)}
+  /* Marks a capability that is only on the hosted service, not in the open-source download.
+     The distinction has to survive skim-reading: somebody deciding whether to self-host must
+     not take a card on this page as a promise about the repository. */
+  .hosted-only{font-size:.66rem;padding:2px 7px;border-radius:5px;font-weight:700;border:1px solid var(--accent);color:var(--accent);text-transform:uppercase;letter-spacing:.06em;margin-left:8px;vertical-align:middle;white-space:nowrap}
+  .cap-note{font-size:.88rem;color:var(--muted);margin:-4px 0 18px}
   .tag.rel{background:rgba(31,157,85,.12);color:var(--ok);border-color:transparent}
   .tag.wip{background:rgba(196,127,10,.14);color:var(--warn);border-color:transparent}
   .tag.asm{background:var(--accent-soft);color:var(--accent);border-color:transparent}
@@ -542,6 +547,43 @@
           <div class="ico">↧</div>
           <h3>Vendor catalog import</h3>
           <p>Drop in a distributor's CSV export — Digi-Key, Mouser, Farnell/Newark and RS Components are recognised from their column headers alone — map the columns once, and see every row classified as new, an update or a problem <em>before</em> anything is written. A careless import is how a part master fills with duplicates.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap-group">
+      <h3>On the hosted service <span class="hosted-only">Hosted</span></h3>
+      <p class="cap-note">These are running on <a href="https://saas.turboplm.com/register">the hosted service</a> and are <strong>not</strong> in the open-source download yet. Everything above this line is in the repository.</p>
+      <div class="grid g3">
+        <div class="card">
+          <div class="ico">⚗</div>
+          <h3>Substance compliance <span class="hosted-only">Hosted</span></h3>
+          <p>Declarations per part against RoHS, REACH SVHC, PFAS, Prop 65, conflict minerals and TSCA, and a roll-up across the assembly. One rule decides the answer: compliant only if every contributor is compliant or exempt, so a single undeclared part makes the whole assembly <em>unknown</em> — not nearly compliant. Most tools round that up to green; this one will not.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⏻</div>
+          <h3>Component obsolescence <span class="hosted-only">Hosted</span></h3>
+          <p>File the PCN, EOL and NRND notices as they arrive and the dates carry onto the part, forwards only — a late bulletin cannot un-announce an end-of-life, and where two notices disagree the earliest last-time-buy binds. The risk report states what is known and deliberately computes no recommended buy quantity: that depends on demand nobody has committed to.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⊘</div>
+          <h3>Waivers <span class="hosted-only">Hosted</span></h3>
+          <p>Bounded permission, granted in advance by somebody other than the requester, to ship something that does not match its drawing. A quantity, a date or both — one with neither is not a waiver. The remaining allowance is counted from the units actually recorded against it, so it cannot drift.</p>
+        </div>
+        <div class="card">
+          <div class="ico">✓</div>
+          <h3>Release readiness <span class="hosted-only">Hosted</span></h3>
+          <p>Every reason a revision cannot be released, answered at once instead of one refusal at a time — access, state, change-order ownership, outstanding signatures and unreleased children — plus a one-press release of a whole assembly bottom-up. It never submits for review and never signs for you.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇆</div>
+          <h3>BOM rework at scale <span class="hosted-only">Hosted</span></h3>
+          <p>Renumber a BOM or swap a part for its replacement across every assembly that uses it, previewed before anything is written. Released structures are left alone and listed with the reason, because a released BOM is the record of what was released.</p>
+        </div>
+        <div class="card">
+          <div class="ico">◎</div>
+          <h3>Comments, mentions and follows <span class="hosted-only">Hosted</span></h3>
+          <p>Discussion attached to the part, change or project it is about, with @mentions, follow/unfollow and a per-item activity timeline. Somebody who loses access to an item stops hearing about it.</p>
         </div>
       </div>
     </div>
@@ -936,6 +978,16 @@
           Clone the repository and bring the whole stack up with Docker Compose — the
           application, the database and the CAD service, seeded with sample data, in a
           couple of minutes.
+        </p>
+        <!-- Stated here as well as on the capability cards. Somebody who reads only this
+             section before deciding to self-host would otherwise find out after cloning,
+             and a surprise of that kind is the sort of thing a reader is right to resent. -->
+        <p style="color:var(--muted);font-size:.93rem;margin:10px 0 0;max-width:56ch">
+          What you get is the product record in full — parts, revisions, BOMs, change control,
+          documents and CAD, requirements, quality, sourcing and the AI assist on your own key.
+          The newest work lands on the hosted service first: substance compliance, component
+          obsolescence, waivers, the release tools and the collaboration features are marked
+          <span class="hosted-only">Hosted</span> above and are not in the download yet.
         </p>
         <!-- Now genuinely open source (AGPL-3.0), so the word is used deliberately and is
              accurate. It was FSL-1.1-MIT until 1 Aug 2026, which is source-available and NOT

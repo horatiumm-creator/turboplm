@@ -36,6 +36,27 @@ and you have the same thing.</sub>
 > **Pre-1.0.** It runs, and everything below works, but read the Deployment Notes
 > before putting it anywhere that matters.
 
+### What is here, and what is only on the hosted service
+
+Everything under **Features** below is in this repository and runs when you `docker compose
+up`. Nothing in that list is a teaser.
+
+Newer work lands on the hosted service first, and these are **not in this repository yet**:
+
+| Not here yet | What it does |
+|---|---|
+| Substance compliance | RoHS / REACH SVHC / PFAS / Prop 65 / conflict minerals / TSCA declarations per part, and a roll-up across the assembly |
+| Component obsolescence | PCN / EOL / NRND notices, lifecycle carried onto the AML row, and an exposure report |
+| Waivers | Bounded permission to ship a departure from the released design, with usage counted against it |
+| Release readiness & cascade | Every blocker on a release in one answer, and releasing an assembly bottom-up |
+| BOM rework at scale | Bulk line editing, renumbering, and replacing a part across every BOM that uses it |
+| Comments, @mentions, follows | Discussion on parts, changes and projects, with a per-item activity timeline |
+| Spreadsheet BOM import | Loading a BOM from a spreadsheet with a before-and-after preview |
+
+This table is here so the decision to self-host is made with the real picture. It is not a
+commitment to a date — if one of these is the reason you would adopt TurboPLM, say so on an
+issue, because that is the signal that moves it.
+
 ---
 ## Features
 
