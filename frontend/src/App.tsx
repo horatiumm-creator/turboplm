@@ -3,6 +3,7 @@ import { RequireAuth, useAuth } from './auth/AuthContext';
 import AppLayout from './components/AppLayout';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Profile from './pages/Profile';
 import Dashboard from './pages/Dashboard';
 import MyWork from './pages/MyWork';
 import PartsList from './pages/PartsList';
@@ -137,6 +138,7 @@ export default function App() {
         <Route path="/erp" element={<ErpExchange />} />
         <Route path="/configure" element={<Configurator />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/profile" element={<Profile />} />
         <Route
           path="/admin/users"
           element={

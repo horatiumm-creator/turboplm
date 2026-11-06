@@ -18,6 +18,7 @@ import {
   Steps,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -33,6 +34,7 @@ import {
   SendOutlined,
   StopOutlined,
   SwapOutlined,
+  BulbOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -42,6 +44,9 @@ import ItemAccessCard from '../components/ItemAccessCard';
 import { useAuth } from '../auth/AuthContext';
 import DocumentsCard from '../components/DocumentsCard';
 import SignaturePanel from '../components/SignaturePanel';
+import ChangeBriefCard from '../components/ecn/ChangeBriefCard';
+import AiProvenance from '../components/AiProvenance';
+import type { AiCapabilities, AiReviewerSuggestions } from '../api/types';
 import type {
   EcnDetail as EcnDetailDto,
   EcnDisposition,
@@ -137,6 +142,33 @@ export default function EcnDetail() {
   // Bumped whenever the ECN reloads: an item change may have voided signatures, and the
   // panel has to re-read the manifest to notice.
   const [signatureKey, setSignatureKey] = useState(0);
+
+  /*
+   * UP HERE WITH THE OTHER HOOKS, and it has to stay here.
+   *
+   * These four sat further down, next to the reviewer-suggestion handler they belong to, which
+   * reads better and crashed the page. The component returns early twice below — once while
+   * `loading`, once when the ECN is not found — so on the first render React saw the hooks
+   * above those returns and nothing else. When the fetch resolved and the full body ran, it
+   * saw four more, threw "Rendered more hooks than during the previous render", and the whole
+   * ECN page went blank. Every render of this page begins in the loading state, so it was not
+   * an edge case: it was the page.
+   *
+   * Nothing in the test suite could see it — the suites drive the API, and tsc does not
+   * enforce the rules of hooks. It took loading the page in a browser.
+   */
+  const [aiCaps, setAiCaps] = useState<AiCapabilities | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<AiReviewerSuggestions | null>(null);
+
+  useEffect(() => {
+    // A deployment with no key is the normal case, so a failure here hides the button rather
+    // than surfacing an error nobody can act on.
+    void api
+      .getAiCapabilities()
+      .then(setAiCaps)
+      .catch(() => setAiCaps(null));
+  }, []);
 
   const load = useCallback(async () => {
     if (!Number.isInteger(ecnId) || ecnId <= 0) {
@@ -403,6 +435,22 @@ export default function EcnDetail() {
         }
       },
     });
+  };
+
+  /*
+   * Who has actually touched the affected parts. The suggestion is advisory and the counts it
+   * was made from come back with it, so a reader can disagree with it on the facts rather
+   * than having to take or leave a name.
+   */
+  const suggestReviewers = async () => {
+    setSuggesting(true);
+    try {
+      setSuggestions(await api.aiSuggestReviewers(ecnId));
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : 'Something went wrong');
+    } finally {
+      setSuggesting(false);
+    }
   };
 
   const openAddReviewer = () => {
@@ -909,12 +957,63 @@ export default function EcnDetail() {
         style={{ marginBottom: 16 }}
         extra={
           itemsEditable && (
-            <Button icon={<UserAddOutlined />} onClick={openAddReviewer}>
-              Add reviewer
-            </Button>
+            <Space>
+              {aiCaps?.features.suggestReviewers && (
+                <Tooltip title={`Suggest reviewers from who has worked on these parts (${aiCaps.model})`}>
+                  <Button icon={<BulbOutlined />} loading={suggesting} onClick={suggestReviewers}>
+                    Suggest
+                  </Button>
+                </Tooltip>
+              )}
+              <Button icon={<UserAddOutlined />} onClick={openAddReviewer}>
+                Add reviewer
+              </Button>
+            </Space>
           )
         }
       >
+        {suggestions && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<BulbOutlined />}
+            style={{ marginBottom: 16 }}
+            message={
+              <Space size={6}>
+                <span>Suggested reviewers</span>
+                <AiProvenance model={suggestions.model} paidBy={suggestions.paidBy} />
+              </Space>
+            }
+            description={
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                {suggestions.suggestions.length === 0 ? (
+                  <Typography.Text>
+                    {suggestions.reasoning || 'Nothing to suggest from the recorded work.'}
+                  </Typography.Text>
+                ) : (
+                  suggestions.suggestions.map((s) => {
+                    const facts = suggestions.evidence.find((e) => e.userId === s.userId);
+                    return (
+                      <Space key={s.userId} size={8} wrap>
+                        <Typography.Text strong>{s.name}</Typography.Text>
+                        <Typography.Text type="secondary">{s.why}</Typography.Text>
+                        {/* The recorded counts, so the suggestion can be judged on them. */}
+                        {facts && (
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            ({facts.partsCreated} part(s), {facts.revisionsCreated} revision(s))
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    );
+                  })
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  Add anyone you agree with using “Add reviewer”. Nothing was assigned.
+                </Typography.Text>
+              </Space>
+            }
+          />
+        )}
         {ecn.reviews.length === 0 ? (
           <Typography.Text type="secondary">
             No reviewers assigned — the ECN can be approved directly. Add reviewers to require
@@ -1046,6 +1145,12 @@ export default function EcnDetail() {
           />
         )}
       </Card>
+
+      {/*
+        Above the line-level impact card on purpose: "what does this change reach" is the
+        question asked first, and the card below answers the narrower "which lines call it out".
+      */}
+      <ChangeBriefCard ecnId={ecnId} />
 
       <Card title="Change impact — where the affected parts are used">
         {!impact || impact.length === 0 ? (

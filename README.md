@@ -121,6 +121,21 @@ and you have the same thing.</sub>
   returns it to Draft.
 - **Change impact** — per-ECN where-used rollup showing which assemblies a change ripples
   into.
+- **AI assistance (optional)** — three things a model can do over this instance's own data:
+  explain in prose what a change reaches, turn a one-sentence description into a draft change
+  order you then edit, and propose reviewers from who has recorded work on the affected parts.
+  The model is handed figures the server has already retrieved and asked to explain them; it is
+  never asked for a part number, a quantity or a cost. Part numbers it names are checked
+  against real rows and dropped if they do not exist, suggested people are resolved back to
+  real users, and every answer is labelled advisory and rendered next to the data it was
+  written from. **Off unless a key is configured:** with no key there are no AI controls
+  anywhere in the UI, and nothing else in the product depends on them.
+- **Bring your own AI key** — each person can add their own Anthropic or OpenAI key in their
+  profile, so the calls are billed to their own account. It is encrypted at rest, never
+  returned by any endpoint, and once saved only its last four characters are ever displayed;
+  an administrator can revoke someone's key but cannot read it. A deployment-wide
+  `ANTHROPIC_API_KEY` is an optional fallback for everyone who has not set one — see
+  [Environment Variables](#environment-variables).
 - **Printable ECN notice** — a formal change document at `/ecns/:id/report` with items,
   dispositions, sign-offs and impact, ready to print to PDF.
 - **Quality (NCR/CAPA)** — nonconformances with severity, quantity, a link to the exact
@@ -391,6 +406,8 @@ to long, random values before exposing the stack beyond localhost.
 | `SMTP_SECURE` | `false` | `true` for implicit TLS (465); `false` uses STARTTLS. |
 | `SMTP_USER` / `SMTP_PASS` | *(empty)* | Mailbox credentials. M365 needs *Authenticated SMTP* enabled; with MFA use an app password. |
 | `SMTP_FROM` | *(empty)* | From address on outgoing mail. |
+| `ANTHROPIC_API_KEY` | *(empty)* | Optional deployment-wide fallback key for the AI features, used for anyone who has not set their own. Leave empty and the AI features stay hidden from everyone who has not. |
+| `AI_KEY_ENCRYPTION_KEY` | *(empty; 32+ random characters)* | Required before a user can store their own provider key — it encrypts those keys at rest. Without it, `PUT /api/ai/key` answers 409 rather than keeping somebody's paid credential under something weaker. |
 | `WEBHOOK_BLOCK_PRIVATE_HOSTS` | `false` | Set `true` on internet-facing deployments to refuse private/loopback webhook targets. Link-local and cloud-metadata hosts are always refused. |
 | `JSON_BODY_LIMIT` | `25mb` | Max JSON body — bulk ERP CSV imports travel in the request body. |
 | `CAD_SERVICE_URL` | `http://cad:4100` | Where the API reaches the CAD conversion service. |

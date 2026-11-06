@@ -86,23 +86,27 @@ services:
   web:
     build:
       context: ./frontend
-      args:
-        # The one-click demo login is OFF here, and this file is the reason it has to be.
-        #
-        # VITE_* values are compiled into the client bundle — they are public by
-        # definition. Setting them here baked `demo@turboplm.com / explore-turboplm` into
-        # the JavaScript of every self-hosted build, while the comment above them claimed
-        # they were "unset in every other deployment". They were not: this compose file IS
-        # every other deployment now. It was written when turboplm.com's public demo ran
-        # from it; that demo was retired in October 2026 and only self-hosters run it.
-        #
-        # The button was also broken: `seed.ts` creates demo@turboplm.local, not
-        # demo@turboplm.com, so clicking it failed against a freshly seeded stack.
-        #
-        # Left unset, Login.tsx does not render the button at all. If you are running a
-        # public, throwaway, read-only instance and want it, pass them at build time:
-        #   docker compose build --build-arg VITE_DEMO_EMAIL=… --build-arg VITE_DEMO_PASSWORD=…
-        # and point them at a VIEWER account you are happy for strangers to share.
+      # NO BUILD ARGS, and the key itself is gone rather than left empty: a bare `args:` with
+      # nothing under it is not valid Compose ("services.web.build.args must be a mapping"),
+      # which made `docker compose config` — and therefore the `docker compose up -d --build`
+      # this project's README leads with — fail outright for every self-hoster.
+      #
+      # The one-click demo login is OFF here, and this file is the reason it has to be.
+      #
+      # VITE_* values are compiled into the client bundle — they are public by
+      # definition. Setting them here baked `demo@turboplm.com / explore-turboplm` into
+      # the JavaScript of every self-hosted build, while the comment above them claimed
+      # they were "unset in every other deployment". They were not: this compose file IS
+      # every other deployment now. It was written when turboplm.com's public demo ran
+      # from it; that demo was retired in October 2026 and only self-hosters run it.
+      #
+      # The button was also broken: `seed.ts` creates demo@turboplm.local, not
+      # demo@turboplm.com, so clicking it failed against a freshly seeded stack.
+      #
+      # Left unset, Login.tsx does not render the button at all. If you are running a
+      # public, throwaway, read-only instance and want it, pass them at build time:
+      #   docker compose build --build-arg VITE_DEMO_EMAIL=… --build-arg VITE_DEMO_PASSWORD=…
+      # and point them at a VIEWER account you are happy for strangers to share.
     container_name: turboplm-web
     restart: unless-stopped
     logging: *default-logging

@@ -130,6 +130,136 @@ export interface EcnDetail extends EcnSummary {
   reviews: EcnReviewDetail[];
 }
 
+/*
+ * The change brief (rules CB1–CB4) — what a change reaches, as opposed to which lines call a
+ * part out. Every figure is retrieved from this instance's own data, which is what makes the AI
+ * narrative over it (rule AI1) defensible: the model explains this, it does not supply it.
+ */
+export interface BriefPartRef {
+  id: number;
+  partNumber: string;
+  name: string;
+}
+
+export interface ChangeBriefItem {
+  part: BriefPartRef;
+  fromRevision: string | null;
+  toRevision: string | null;
+  /** Top-level assemblies the part reaches — what a customer actually receives. */
+  products: (BriefPartRef & { level: number; path: string[] })[];
+  /** Reached but not readable by this caller. Counted so the total stays honest (X4). */
+  redactedProducts: number;
+  /**
+   * Released or in-review assembly revisions whose BOM uses this part — structure already
+   * committed to something, as against a draft still being edited, so this is the rework the
+   * change creates. This build keeps no per-line revision pin (rule CB2), so there is no
+   * "assemblies holding the old revision" figure and the brief must not imply one.
+   */
+  releasedAssemblies: { part: BriefPartRef; revision: string; lifecycle: Lifecycle }[];
+  builtUnits: { identifier: string; status: BuildStatus }[];
+  /** Counted with its own query, never from the capped list above (rule CB3). */
+  shippedCount: number;
+  requirements: { id: number; reqNumber: string; title: string }[];
+  openNcrs: { id: number; ncrNumber: string; title: string }[];
+  truncated: boolean;
+}
+
+export interface ChangeBrief {
+  ecn: { id: number; ecnNumber: string; title: string; status: string; priority: string };
+  items: ChangeBriefItem[];
+  totals: {
+    affectedParts: number;
+    products: number;
+    redactedProducts: number;
+    releasedAssemblies: number;
+    builtUnits: number;
+    shippedUnits: number;
+    requirements: number;
+    openNcrs: number;
+  };
+  notes: string[];
+}
+
+/** What the deployment can actually do. Answers without a key, so the UI can hide the rest. */
+export type AiProvider = 'ANTHROPIC' | 'OPENAI';
+
+/**
+ * Answered PER CALLER, not per instance: two people on one instance get different answers now
+ * that a key can be their own. `configured` means "this caller can use the AI features", which
+ * is true if either they have a key or the operator set one.
+ */
+export interface AiCapabilities {
+  configured: boolean;
+  /** Whose key would pay, or null when nobody's would. */
+  source: 'user' | 'deployment' | null;
+  /** The caller's own key, described well enough to recognise and never to use. */
+  ownKey: { provider: AiProvider; hint: string | null; setAt: string | null } | null;
+  /** Whether the deployment can take custody of a key at all (it needs an encryption key). */
+  canStoreKeys: boolean;
+  model: string | null;
+  features: { changeNarrative: boolean; draftChangeOrder: boolean; suggestReviewers: boolean };
+}
+
+/**
+ * The answer to saving a key. `verified` is three-valued on purpose: the provider accepted it,
+ * the provider rejected it, or nobody could tell — and the key is stored in all three cases.
+ * An outage is evidence about the network, not about the key.
+ */
+export interface AiKeyStored {
+  stored: true;
+  provider: AiProvider;
+  hint: string;
+  verified: boolean | null;
+  reason: string | null;
+}
+
+/** Whose provider account this call was billed to. */
+export type AiPaidBy = 'user' | 'deployment';
+
+export interface AiNarrative {
+  narrative: string;
+  model: string;
+  paidBy: AiPaidBy;
+  /** The brief was cut to fit, so the narrative did not see all of it. */
+  inputTruncated: boolean;
+  brief: ChangeBrief;
+  advisory: true;
+}
+
+export interface AiDraftChangeOrder {
+  draft: {
+    title: string;
+    description: string;
+    /** Only part numbers that exist and the caller may read — the rest were discarded. */
+    partNumbers: string[];
+    priority: EcnPriority;
+    uncertain: string[];
+  };
+  /** Part numbers the model named that do not exist. Shown, not hidden (rule AI1). */
+  discardedPartNumbers: string[];
+  candidatesConsidered: number;
+  model: string;
+  paidBy: AiPaidBy;
+  advisory: true;
+}
+
+export interface AiReviewerSuggestions {
+  suggestions: { userId: number; name: string; why: string }[];
+  reasoning: string;
+  /** The counts it reasoned from, so a reader can disagree on the facts. */
+  evidence: {
+    userId: number;
+    name: string;
+    role: Role;
+    partsCreated: number;
+    revisionsCreated: number;
+  }[];
+  model: string | null;
+  /** Null when no model ran at all, which is the no-candidates answer. */
+  paidBy: AiPaidBy | null;
+  advisory: true;
+}
+
 export interface EcnImpactEntry {
   part: PartRef;
   toRevision: RevisionRef | null;

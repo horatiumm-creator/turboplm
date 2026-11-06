@@ -499,6 +499,13 @@ export default function AppLayout() {
               menu={{
                 items: [
                   {
+                    key: 'profile',
+                    icon: <UserOutlined />,
+                    label: 'Your profile',
+                    onClick: () => navigate('/profile'),
+                  },
+                  { type: 'divider' as const },
+                  {
                     key: 'logout',
                     icon: <LogoutOutlined />,
                     label: 'Sign out',
